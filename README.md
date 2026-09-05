@@ -70,14 +70,20 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 npm run build
 ```
 
-This produces a static export in the `out/` directory (see `next.config.js`), which can be deployed to any static host (Vercel, GitHub Pages, Netlify, etc.).
+This produces a static export in the `out/` directory (see `next.config.js`), which can be deployed to any static host (Vercel, GitHub Pages, Netlify, etc.). To preview it locally before deploying:
+
+```bash
+npx serve out
+```
 
 ## Usage
 
 1. **Crystal Structures tab**: pick a structure from the dropdown (or the Gallery), adjust supercell repetitions, toggle bonds/render mode, and drag to rotate / scroll to zoom.
 2. **Miller Indices tab**: switch between Directions and Planes, enter `[uvw]` or `(hkl)` indices, and choose the conventional or primitive cell to see the corresponding vector or plane rendered on the lattice.
 3. **Symmetry tab**: choose a symmetry operation, pick Direct or Step-by-Step mode, and apply it to the default point to see its orbit build up in both the 3D view and the 2D stereographic projection.
-4. Use the language toggle (FR/EN) and theme toggle (☀️/🌙) in the header at any time; the footer's **Feedback** button opens a short form for bug reports or suggestions.
+4. **Gallery tab**: browse all 19 structures at a glance and jump straight to any of them.
+5. **Controls**: on mobile, tap the Controls icon in the bottom nav to open the settings drawer; on desktop, the same controls live in the side panel.
+6. Use the language toggle (FR/EN) and theme toggle (☀️/🌙) in the header at any time; the footer's **Feedback** button opens a short form for bug reports or suggestions.
 
 ## Project Structure
 
