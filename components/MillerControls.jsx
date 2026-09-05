@@ -1,5 +1,8 @@
 'use client'
 
+import { Fragment } from 'react'
+import OverbarNumber from './OverbarNumber'
+
 const DIR_PRESETS = [
   {uvw:[1,0,0]},{uvw:[0,1,0]},{uvw:[0,0,1]},{uvw:[1,1,0]},
   {uvw:[1,0,1]},{uvw:[0,1,1]},{uvw:[1,1,1]},{uvw:[-1,1,0]},
@@ -11,10 +14,10 @@ const PLANE_PRESETS = [
   {hkl:[2,1,0]},{hkl:[-1,1,0]}
 ]
 
-function fmt(n) {
-  if (n === 0) return '0'
-  if (n < 0) return String(Math.abs(n)) + '\u0305'
-  return String(n)
+function IdxList({ values }) {
+  return values.map((n, i) => (
+    <Fragment key={i}>{i > 0 && ' '}<OverbarNumber n={n} /></Fragment>
+  ))
 }
 
 export default function MillerControls({
@@ -41,7 +44,7 @@ export default function MillerControls({
 
       <span className="ctrl-label">{t('labelOriginCorner')}</span>
       <select value={millerOrigin.join(',')} onChange={e => onOrigin(e.target.value)} style={{ marginBottom: 4 }}>
-        <option value="0,0,0">[0 0 0] — default</option>
+        <option value="0,0,0">{t('origin000')}</option>
         <option value="1,0,0">[1 0 0]</option>
         <option value="0,1,0">[0 1 0]</option>
         <option value="0,0,1">[0 0 1]</option>
@@ -69,7 +72,7 @@ export default function MillerControls({
             {DIR_PRESETS.map((p, i) => (
               <div key={i} className={`chip${millerU==p.uvw[0]&&millerV==p.uvw[1]&&millerW==p.uvw[2]?' sel':''}`}
                 onClick={() => onUVW('preset', p.uvw)}>
-                [{p.uvw.map(fmt).join(' ')}]
+                [<IdxList values={p.uvw} />]
               </div>
             ))}
           </div>
@@ -96,7 +99,7 @@ export default function MillerControls({
             {PLANE_PRESETS.map((p, i) => (
               <div key={i} className={`chip${millerH==p.hkl[0]&&millerK==p.hkl[1]&&millerL==p.hkl[2]?' sel':''}`}
                 onClick={() => onHKL('preset', p.hkl)}>
-                ({p.hkl.map(fmt).join(' ')})
+                (<IdxList values={p.hkl} />)
               </div>
             ))}
           </div>

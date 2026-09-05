@@ -194,8 +194,10 @@ select:focus { outline: none; border-color: var(--accent); }
 
 /* ── Toggle buttons ── */
 .mode-toggle { display: flex; gap: 2px; margin-top: 6px; }
+.ops-row { display: flex; }
 .mode-btn {
   flex: 1;
+  min-width: 0;
   padding: 7px 4px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -204,6 +206,9 @@ select:focus { outline: none; border-color: var(--accent); }
   cursor: pointer;
   transition: 0.2s;
   font-family: 'Share Tech Mono', monospace;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
 }
 .mode-btn.active {
   background: rgba(108,99,255,0.2);
@@ -224,6 +229,18 @@ select:focus { outline: none; border-color: var(--accent); }
   letter-spacing: 1px;
   transition: 0.2s;
   text-transform: uppercase;
+  /* Never wrap onto a second line — that's what made the longer-text
+     button (e.g. Auto-Rotate, especially in French) grow taller than its
+     siblings. Text stays on one line and the button's width grows to fit
+     it instead; flex-shrink:0 keeps it from being squeezed narrower than
+     that content width when the header runs out of room (the header
+     title/spacer shrink first, same as they already did). An explicit
+     line-height is also needed: without it, the "⟳" glyph alone renders
+     with taller font metrics than plain text, making that one button
+     taller even with no wrapping involved. */
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1;
 }
 .btn-action:hover { border-color: var(--accent); color: var(--accent); }
 .btn-action.on { border-color: var(--green); color: var(--green); }
@@ -272,7 +289,6 @@ select:focus { outline: none; border-color: var(--accent); }
   font-family: 'Share Tech Mono', monospace;
   letter-spacing: 0.5px;
   transition: 0.2s;
-  text-transform: uppercase;
 }
 .sub-tab.active {
   background: var(--card);
@@ -366,29 +382,37 @@ select:focus { outline: none; border-color: var(--accent); }
 .ov-btn:hover { border-color: var(--accent); color: var(--accent); }
 .ov-btn.on { border-color: var(--green); color: var(--green); }
 
+/* No white-space: nowrap and a max-width so longer translations (French
+   runs noticeably longer than English for both of these) wrap onto a
+   second line instead of overflowing past the centered position and
+   overlapping other UI at narrow widths. Each hint is bottom-anchored
+   independently, so a wrapped upper hint just grows upward, away from the
+   lower one, instead of colliding with it. */
 .hint {
   position: absolute;
   bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
+  max-width: 92%;
+  text-align: center;
   font-size: 0.65rem;
   color: var(--dim);
   opacity: 0.6;
   font-family: 'Share Tech Mono', monospace;
   pointer-events: none;
-  white-space: nowrap;
 }
 .keyboard-hint {
   position: absolute;
   bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
+  max-width: 92%;
+  text-align: center;
   font-size: 0.6rem;
   color: var(--dim);
   opacity: 0.45;
   font-family: 'Share Tech Mono', monospace;
   pointer-events: none;
-  white-space: nowrap;
 }
 
 /* ── Axis labels ── */
@@ -413,6 +437,8 @@ select:focus { outline: none; border-color: var(--accent); }
 .viewport-gallery {
   display: none;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-auto-rows: max-content;
+  align-items: start;
   gap: 14px;
   align-content: start;
   flex: 1;
@@ -474,22 +500,45 @@ select:focus { outline: none; border-color: var(--accent); }
 
 /* ── Footer ── */
 .app-footer {
-  height: 36px;
+  min-height: 36px;
   flex-shrink: 0;
   background: linear-gradient(90deg, #0d0d30 0%, #0a0a22 100%);
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 6px 16px;
   justify-content: space-between;
   z-index: 30;
 }
-.footer-left { display: flex; align-items: center; gap: 10px; }
+/* Just the dev-credit text — wraps onto a second line on its own when
+   narrow, independent of the icon/feedback group on the right. */
+.footer-left { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; row-gap: 2px; }
 .footer-dev { font-size: 0.7rem; color: var(--dim); font-family: 'Share Tech Mono', monospace; letter-spacing: 0.5px; }
 .footer-dev strong { color: var(--accent2); font-weight: 600; }
-.footer-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); }
+.footer-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
 .footer-version { font-size: 0.65rem; color: var(--border); font-family: 'Share Tech Mono', monospace; }
+/* The icon and Feedback button are grouped so they always stay on the
+   same row together, right at the edge of the bar — regardless of
+   whether .footer-left has wrapped to one or two lines. */
+.footer-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* No border/box — just the icon itself, sized to match the feedback
+   button's height. */
+.footer-github-link {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  cursor: pointer;
+  transition: 0.2s;
+  text-decoration: none;
+}
+.footer-github-link:hover {
+  color: var(--accent);
+}
 .footer-feedback-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--dim);
@@ -672,10 +721,6 @@ select:focus { outline: none; border-color: var(--accent); }
   .header h1 { font-size: 0.75rem; letter-spacing: 2px; }
   .header { padding: 0 10px; gap: 8px; }
 
-  /* Footer: compress */
-  .footer-dev { display: none; }
-  .footer-dot { display: none; }
-
   /* Hint text smaller */
   .hint { font-size: 0.6rem; bottom: 6px; }
   .keyboard-hint { display: none; }
@@ -738,8 +783,8 @@ select:focus { outline: none; border-color: var(--accent); }
   
   /* Footer: extra compact */
   .app-footer {
-    height: 32px;
-    padding: 0 10px;
+    min-height: 32px;
+    padding: 4px 10px;
     font-size: 0.6rem;
   }
   
@@ -769,12 +814,12 @@ select:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 480px) {
   /* Gallery: vertical single column list on phones with 2:1 aspect ratio */
   .viewport-gallery { grid-template-columns: 1fr; padding: 12px; gap: 14px; }
-  .gallery-card { display: grid; grid-template-columns: 1fr; }
   .gallery-canvas-wrap { aspect-ratio: 2 / 1; }
   .gallery-label { padding: 12px; }
   .gallery-label .gname { font-size: 0.77rem; margin-bottom: 8px; font-weight: 700; }
   .gallery-label .gmeta { font-size: 0.66rem; line-height: 1.5; }
-  .header { height: 40px; padding: 0 6px; }
+  .header { height: 40px; padding: 0 6px; gap: 6px; }
+  .btn-action { padding: 5px 6px !important; font-size: 0.6rem !important; }
   
   /* Drawer panel more compact */
   .drawer-panel {
@@ -822,11 +867,10 @@ select:focus { outline: none; border-color: var(--accent); }
   .header h1 { display: none; }
   
   .app-footer {
-    height: 30px;
-    padding: 0 6px;
+    min-height: 30px;
+    padding: 4px 6px;
   }
-  .footer-version { display: none; }
-  
+
   .mobile-nav {
     height: 48px;
   }

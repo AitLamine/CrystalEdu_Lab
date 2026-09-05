@@ -1,5 +1,5 @@
 'use client'
-export default function Header({ lang, autoRot, theme = 'dark', sidebarOpen, isCompactMode, isSidebarPinned, onToggleLang, onToggleAutoRot, onToggleTheme, onToggleSidebarPin, t }) {
+export default function Header({ lang, autoRot, theme = 'dark', onToggleLang, onToggleAutoRot, onToggleTheme, t }) {
   return (
     <header className="header">
       <div className="header-dot" />
@@ -9,7 +9,7 @@ export default function Header({ lang, autoRot, theme = 'dark', sidebarOpen, isC
       <button
         className="btn-action"
         onClick={onToggleLang}
-        style={{ width: 'auto', marginTop: 0, padding: '5px 12px', fontSize: '0.68rem', marginRight: 6 }}
+        style={{ width: 'auto', marginTop: 0, padding: '5px 12px', fontSize: '0.68rem' }}
       >
         {lang === 'en' ? 'FR' : 'EN'}
       </button>
@@ -20,22 +20,18 @@ export default function Header({ lang, autoRot, theme = 'dark', sidebarOpen, isC
       >
         ⟳ {autoRot ? t('autoRotOn') : t('autoRotOff')}
       </button>
+      {/* Icon only (no text label) to save width on narrow screens — the
+          sun/moon symbol alone is understood, and the full translated
+          label is still exposed via title/aria-label for accessibility. */}
       <button
         className="btn-action"
         onClick={onToggleTheme}
-        style={{ width: 'auto', marginTop: 0, padding: '5px 12px', fontSize: '0.68rem', marginLeft: 6 }}
+        title={theme === 'dark' ? t('themeLight') : t('themeDark')}
+        aria-label={theme === 'dark' ? t('themeLight') : t('themeDark')}
+        style={{ width: 'auto', marginTop: 0, padding: '5px 10px', fontSize: '0.68rem' }}
       >
-        {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+        {theme === 'dark' ? '☀️' : '🌙'}
       </button>
-      {isCompactMode && (
-        <button
-          className="btn-action"
-          onClick={onToggleSidebarPin}
-          style={{ width: 'auto', marginTop: 0, padding: '5px 12px', fontSize: '0.68rem', marginLeft: 6 }}
-        >
-          {isSidebarPinned ? '📌 Pinned' : '📍 Pin' }
-        </button>
-      )}
     </header>
   )
 }

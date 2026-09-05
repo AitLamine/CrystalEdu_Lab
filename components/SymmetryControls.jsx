@@ -1,172 +1,28 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { SYMMETRY_OPERATIONS } from '@/lib/symmetryOperations';
 
-// ── Symmetry Operations Database ──────────────────────────────────────────────
-const SYMMETRY_OPERATIONS = {
-  // PROPER ROTATIONS
-  '1': {
-    name: 'Identity (1)',
-    type: 'proper',
-    order: 1,
-    axis: null,
-    transform: (x, y, z) => [x, y, z],
-    positions: 1,
-    above: 1,
-    below: 0,
-    description: 'No transformation - identity operation'
-  },
-  '2//Oz': {
-    name: '2-fold rotation // Oz',
-    type: 'proper',
-    order: 2,
-    axis: 'c',
-    transform: (x, y, z) => [-x, -y, z],
-    positions: 2,
-    above: 2,
-    below: 0,
-    description: '180° rotation around z-axis'
-  },
-  '2//Oy': {
-    name: '2-fold rotation // Oy',
-    type: 'proper',
-    order: 2,
-    axis: 'b',
-    transform: (x, y, z) => [-x, y, -z],
-    positions: 2,
-    above: 1,
-    below: 1,
-    description: '180° rotation around y-axis'
-  },
-  '3': {
-    name: '3-fold rotation (C3)',
-    type: 'proper',
-    order: 3,
-    axis: 'c',
-    transform: (x, y, z) => {
-      // 120° rotation around z-axis
-      const cos = Math.cos(2 * Math.PI / 3);
-      const sin = Math.sin(2 * Math.PI / 3);
-      return [x * cos - y * sin, x * sin + y * cos, z];
-    },
-    positions: 3,
-    above: 3,
-    below: 0,
-    description: '120° rotation around z-axis'
-  },
-  '4': {
-    name: '4-fold rotation (C4)',
-    type: 'proper',
-    order: 4,
-    axis: 'c',
-    transform: (x, y, z) => [-y, x, z],
-    positions: 4,
-    above: 4,
-    below: 0,
-    description: '90° rotation around z-axis'
-  },
-  '6': {
-    name: '6-fold rotation (C6)',
-    type: 'proper',
-    order: 6,
-    axis: 'c',
-    transform: (x, y, z) => {
-      // 60° rotation around z-axis
-      const cos = Math.cos(Math.PI / 3);
-      const sin = Math.sin(Math.PI / 3);
-      return [x * cos - y * sin, x * sin + y * cos, z];
-    },
-    positions: 6,
-    above: 6,
-    below: 0,
-    description: '60° rotation around z-axis'
-  },
-
-  // IMPROPER ROTATIONS
-  '1̄': {
-    name: 'Inversion (1̄)',
-    type: 'improper',
-    order: 1,
-    axis: null,
-    transform: (x, y, z) => [-x, -y, -z],
-    positions: 2,
-    above: 1,
-    below: 1,
-    description: 'Inversion through origin'
-  },
-  '2̄//Oz': {
-    name: 'Mirror ⊥ Oz (2̄ // Oz)',
-    type: 'improper',
-    order: 2,
-    axis: 'c',
-    transform: (x, y, z) => [x, y, -z],
-    positions: 2,
-    above: 1,
-    below: 1,
-    description: 'Reflection across xy-plane'
-  },
-  '2̄//Oy': {
-    name: 'Mirror ⊥ Oy (2̄ // Oy)',
-    type: 'improper',
-    order: 2,
-    axis: 'b',
-    transform: (x, y, z) => [x, -y, z],
-    positions: 2,
-    above: 2,
-    below: 0,
-    description: 'Reflection across xz-plane'
-  },
-  '3̄': {
-    name: '3-fold improper (3̄)',
-    type: 'improper',
-    order: 6,
-    axis: 'c',
-    transform: (x, y, z) => {
-      // C3 rotation + inversion
-      const cos = Math.cos(2 * Math.PI / 3);
-      const sin = Math.sin(2 * Math.PI / 3);
-      const rx = x * cos - y * sin;
-      const ry = x * sin + y * cos;
-      return [-rx, -ry, -z];
-    },
-    positions: 6,
-    above: 3,
-    below: 3,
-    description: 'C3 rotation + inversion',
-    compound: true
-  },
-  '4̄': {
-    name: '4-fold improper (4̄)',
-    type: 'improper',
-    order: 4,
-    axis: 'c',
-    transform: (x, y, z) => [-y, x, -z],
-    positions: 4,
-    above: 2,
-    below: 2,
-    description: 'C4 rotation + inversion',
-    compound: true
-  },
-  '6̄': {
-    name: '6-fold improper (6̄)',
-    type: 'improper',
-    order: 6,
-    axis: 'c',
-    transform: (x, y, z) => {
-      // C6 rotation + inversion
-      const cos = Math.cos(Math.PI / 3);
-      const sin = Math.sin(Math.PI / 3);
-      const rx = x * cos - y * sin;
-      const ry = x * sin + y * cos;
-      return [-rx, -ry, -z];
-    },
-    positions: 6,
-    above: 3,
-    below: 3,
-    description: 'C6 rotation + inversion',
-    compound: true
-  }
-};
+// Renders labels like "4̄" or "2̄//Oz" with the overbar drawn as a precise CSS
+// border instead of relying on the Unicode combining-macron character: fonts
+// have no mark-attachment data for macron-over-digit (that's tuned for
+// letters), so the browser places it inconsistently — often not centered —
+// depending on font/OS. Drawing it ourselves keeps it exactly centered above
+// just the digit everywhere.
+function OverbarLabel({ text }) {
+  const m = text.match(/^(\d)[\u0300-\u036f]?(.*)$/);
+  if (!m) return <>{text}</>;
+  const [, digit, rest] = m;
+  return (
+    <span style={{ whiteSpace: 'nowrap' }}>
+      <span style={{ position: 'relative', display: 'inline-block' }}>
+        {digit}
+        <span style={{ position: 'absolute', top: '-0.2em', left: 0, right: 0, borderTop: '1.4px solid currentColor' }} />
+      </span>
+      {rest}
+    </span>
+  );
+}
 
 export default function SymmetryControls({
   t,
@@ -174,13 +30,17 @@ export default function SymmetryControls({
   onStartPoint,
   selectedOperation,
   onOperationSelect,
+  selectedAxis,
+  onAxisSelect,
+  axisAutoSynced,
   onApplyOperation,
   onReset,
   onUndo,
   onBack,
   operationsLog,
   stepMode,
-  onStepMode,
+  onStepModeToggle,
+  stepFreshEntry,
   currentStep,
   onCurrentStep,
   // Application Mode props
@@ -203,317 +63,22 @@ export default function SymmetryControls({
   animationSpeed,
   onAnimationSpeedChange,
   projectionZoom,
+  onProjectionZoomChange,
 }) {
-  const canvasRef = useRef(null);
-  const savedAtomsRef = useRef([]);
-  const selectedOperationRef = useRef(selectedOperation);
-  const startPointRef = useRef(startPoint);
-  const previewAtomRef = useRef(previewAtom);
-  const currentBasePointRef = useRef(currentBasePoint);
-
-  const basePoint = (currentBasePoint && Array.isArray(currentBasePoint) && currentBasePoint.length === 3)
-    ? currentBasePoint
-    : startPoint;
-
-  // ── Stereographic Projection Drawing ────────────────────────────────────────
-  const drawStereographicProjection = () => {
-    console.log('[DRAW] drawStereographicProjection called');
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const radius = Math.max(24, Math.min(centerX, centerY) - 20) * projectionZoom;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw projection circle
-    const circleBoldOps = ['2̄//Oz', '6̄'];
-    ctx.strokeStyle = '#333333';
-    ctx.lineWidth = circleBoldOps.includes(selectedOperation) ? 3 : 1;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-    ctx.stroke();
-
-    // Draw axis indicators for specific operations
-    if (selectedOperation === '2//Oy') {
-      ctx.strokeStyle = '#111111';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(centerX - radius, centerY);
-      ctx.lineTo(centerX + radius, centerY);
-      ctx.stroke();
-    }
-    if (selectedOperation === '2̄//Oy') {
-      ctx.strokeStyle = '#111111';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(centerX, centerY - radius);
-      ctx.lineTo(centerX, centerY + radius);
-      ctx.stroke();
-    }
-
-    // Draw center symbol according to operation
-    drawCenterSymbol(ctx, centerX, centerY, radius, selectedOperation);
-
-    // Determine cylinder axis based on operation
-    let cylinderAxis = 'c';
-    if (selectedOperation.includes('Oy')) cylinderAxis = 'b';
-    if (selectedOperation.includes('Ox')) cylinderAxis = 'a';
-
-    // Helper function to project point stereographically
-    const projectPoint = (point) => {
-      const [x, y, z] = Array.isArray(point) ? point : [point.x, point.y, point.z];
-      if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
-
-      let planeX, planeY, height;
-      if (cylinderAxis === 'c') {
-        planeX = x;
-        planeY = y;
-        height = z;
-      } else if (cylinderAxis === 'b') {
-        planeX = x;
-        planeY = z;
-        height = y;
-      } else { // 'a'
-        planeX = y;
-        planeY = z;
-        height = x;
-      }
-
-      const r_plane = Math.sqrt(planeX * planeX + planeY * planeY);
-      const r_total = Math.sqrt(planeX * planeX + planeY * planeY + height * height);
-      if (r_total === 0) return null;
-
-      const xn = planeX / r_total;
-      const yn = planeY / r_total;
-      const zn = height / r_total;
-
-      let projRadius;
-      if (zn >= 0) {
-        projRadius = (radius * r_plane) / (r_total + height);
-      } else {
-        projRadius = (radius * r_plane) / (r_total - height);
-      }
-      let angle = Math.atan2(planeY, planeX);
-      const px = centerX + projRadius * Math.cos(angle);
-      const py = centerY - projRadius * Math.sin(angle);  // Note: - for correct orientation
-
-      return { px, py, isAbove: zn >= 0 };
-    };
-
-    // Helper to draw cross (×) symbol
-    const drawCross = (px, py, size = 10, color = '#e03030', lineWidth = 3) => {
-      ctx.strokeStyle = '#e03030';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(px - size, py - size);
-      ctx.lineTo(px + size, py + size);
-      ctx.moveTo(px + size, py - size);
-      ctx.lineTo(px - size, py + size);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    };
-
-    // Helper to draw circle (○) symbol
-    const drawCircle = (px, py, size = 10, color = '#e03030', lineWidth = 3) => {
-      ctx.strokeStyle = '#e03030';
-      ctx.lineWidth = 3;
-      ctx.fillStyle = '#ffffff';
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(px, py, size, 0, 2 * Math.PI);
-      ctx.stroke();
-      ctx.fill();
-      ctx.setLineDash([]);
-    };
-
-    const drawOverlapSymbol = (px, py) => {
-      drawCircle(px, py, 12, '#e03030', 3);
-      drawCross(px, py, 10, '#e03030', 3);
-    };
-
-    const drawCenterSymbol = (ctx, CX, CY, R, op) => {
-      ctx.strokeStyle = '#111111';
-      ctx.fillStyle = '#111111';
-      ctx.lineWidth = 2;
-      const drawTriangle = (filled, size = 14) => {
-        const h = Math.sqrt(3) / 2 * size;
-        ctx.beginPath();
-        ctx.moveTo(CX, CY - (2 / 3) * h);
-        ctx.lineTo(CX - size / 2, CY + (1 / 3) * h);
-        ctx.lineTo(CX + size / 2, CY + (1 / 3) * h);
-        ctx.closePath();
-        if (filled) ctx.fill(); else ctx.stroke();
-      };
-      const drawDiamond = (filled, size = 12) => {
-        ctx.beginPath();
-        ctx.moveTo(CX, CY - size / 2);
-        ctx.lineTo(CX + size / 2, CY);
-        ctx.lineTo(CX, CY + size / 2);
-        ctx.lineTo(CX - size / 2, CY);
-        ctx.closePath();
-        if (filled) ctx.fill(); else ctx.stroke();
-      };
-      const drawHexagon = (filled, size = 14) => {
-        const r = size / 2;
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const theta = Math.PI / 3 * i - Math.PI / 6;
-          const x = CX + r * Math.cos(theta);
-          const y = CY + r * Math.sin(theta);
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        if (filled) ctx.fill(); else ctx.stroke();
-      };
-
-      if (op === '2//Oz') {
-        ctx.beginPath();
-        ctx.ellipse(CX, CY, 7, 4, 0, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (op === '2//Oy') {
-        ctx.beginPath();
-        ctx.ellipse(CX - R, CY, 5, 3, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.ellipse(CX + R, CY, 5, 3, 0, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (op === '3') {
-        drawTriangle(true);
-      } else if (op === '4') {
-        drawDiamond(true, 12);
-      } else if (op === '6') {
-        drawHexagon(true, 14);
-      } else if (op === '3̄') {
-        drawTriangle(false);
-      } else if (op === '4̄') {
-        drawDiamond(false, 14);
-        ctx.beginPath();
-        ctx.ellipse(CX, CY, 2.5, 4, 0, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (op === '6̄') {
-        drawHexagon(false, 16);
-        drawTriangle(true, 8);
-      }
-    };
-    // Draw all saved atoms (solid red) and starting point
-    const points = [];
-    if (savedAtoms && Array.isArray(savedAtoms)) {
-      savedAtoms.forEach(atom => {
-        const proj = projectPoint(atom);
-        if (!proj) return;
-        points.push({ ...proj, isPreview: false });
-      });
-    }
-    if (points.length === 0 && startPoint) {
-      const proj = projectPoint(startPoint);
-      if (proj) points.push({ ...proj, isPreview: false });
-    }
-
-    const used = new Array(points.length).fill(false);
-    for (let i = 0; i < points.length; i++) {
-      if (used[i]) continue;
-      const p = points[i];
-      if (!p.isAbove) continue;
-      const partnerIndex = points.findIndex((q, j) => j !== i && !used[j] && !q.isAbove && Math.hypot(q.px - p.px, q.py - p.py) < 6);
-      if (partnerIndex !== -1) {
-        const q = points[partnerIndex];
-        drawOverlapSymbol(p.px, p.py, p.isPreview || q.isPreview);
-        used[i] = true;
-        used[partnerIndex] = true;
-      }
-    }
-
-    for (let i = 0; i < points.length; i++) {
-      if (used[i]) continue;
-      const p = points[i];
-      if (p.isAbove) drawCross(p.px, p.py, 10, '#e03030', 2, p.isPreview);
-      else drawCircle(p.px, p.py, 12, '#e03030', 2, p.isPreview);
-    }
-
-    // Draw moving preview atom (while animation runs or final before save)
-    const animatedPoint = (previewAtom && previewAtom.isPreview) ? previewAtom : null;
-    if (animatedPoint) {
-      // Check if this point is already saved (to avoid duplicate drawing)
-      const isAlreadySaved = savedAtoms.some(saved => {
-        const [ax, ay, az] = Array.isArray(animatedPoint) ? animatedPoint : [animatedPoint.x, animatedPoint.y, animatedPoint.z];
-        return Math.abs(saved.x - ax) < 1e-6 && Math.abs(saved.y - ay) < 1e-6 && Math.abs(saved.z - az) < 1e-6;
-      });
-      if (!isAlreadySaved) {
-        const proj = projectPoint(animatedPoint);
-        if (proj) {
-          if (proj.isAbove) {
-            drawCross(proj.px, proj.py, 10, '#e03030', 2, true);
-          } else {
-            drawCircle(proj.px, proj.py, 12, '#e03030', 2, true);
-          }
-        }
-      }
-    }
-
-    // Draw points from operations log
-    // REMOVED - now rendering savedAtoms and previewAtom instead
-  };
-
-  useEffect(() => {
-    savedAtomsRef.current = savedAtoms;
-    selectedOperationRef.current = selectedOperation;
-    startPointRef.current = startPoint;
-    previewAtomRef.current = previewAtom;
-    currentBasePointRef.current = currentBasePoint;
-  }, [savedAtoms, selectedOperation, startPoint, previewAtom, currentBasePoint]);
-
-  useEffect(() => {
-    drawStereographicProjection();
-  }, [selectedOperation, savedAtoms, previewAtom, startPoint, currentBasePoint, projectionZoom, drawStereographicProjection]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onWheel = (e) => {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.05 : 0.05;
-      setProjectionZoom(prev => Math.min(3, Math.max(0.5, prev + delta)));
-    };
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    return () => { canvas.removeEventListener('wheel', onWheel); };
-  }, []);
-
   // ── Operation Buttons ──────────────────────────────────────────────────────
   const properOps = ['1', '2//Oz', '2//Oy', '3', '4', '6'];
   const improperOps = ['1̄', '2̄//Oz', '2̄//Oy', '3̄', '4̄', '6̄'];
+  // Right after entering Step-by-Step, no operation has actually been chosen
+  // yet (only the default point is shown), so suppress the "1" highlight
+  // that would otherwise make it look already clicked.
+  const suppressOpHighlight = stepMode && stepFreshEntry;
 
   return (
     <div id="ctrl-symmetry" className="controls active">
       <span className="ctrl-label">{t('labelSymmetry')}</span>
 
-      <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
-        <button className="mode-btn" onClick={() => onProjectionZoomChange?.(z => Math.min(3, z + 0.1))}>+ Zoom</button>
-        <button className="mode-btn" onClick={() => onProjectionZoomChange?.(z => Math.max(0.5, z - 0.1))}>- Zoom</button>
-        <button className="mode-btn" onClick={() => onProjectionZoomChange?.(1)}>Reset</button>
-        <span style={{marginLeft:'auto', color:'var(--dim)', fontSize:'0.75rem'}}>Zoom {Math.round((projectionZoom || 1) * 100)}%</span>
-      </div>
-
-      {/* Starting Point Input */}
-      <span className="ctrl-label">{t('labelStartPoint')}</span>
-      <div style={{ display:'flex', gap:4, marginBottom:8 }}>
-        {['x','y','z'].map((dim,i) => (
-          <input key={dim} type="number" step="0.01" min="0" max="1" value={startPoint[i].toFixed(2)} onChange={e => {
-              const value = Math.max(0, Math.min(1, Number(e.target.value) || 0));
-              const next = [...startPoint]; next[i] = value;
-              onStartPoint(next);
-            }}
-            style={{ width: '33%', padding:'4px', border:'1px solid var(--border)', borderRadius:'4px', fontSize:'12px' }}
-          />
-        ))}
-      </div>
-
       {/* Operation Selector */}
-      <span className="ctrl-label">Select Operation</span>
+      <span className="ctrl-label">{t('labelSelectOperation')}</span>
 
       {/* Proper Rotations */}
       <div style={{marginBottom:8}}>
@@ -522,9 +87,9 @@ export default function SymmetryControls({
           {properOps.map(op => (
             <button
               key={op}
-              className={`mode-btn${selectedOperation===op?' active':''}`}
+              className={`mode-btn${selectedOperation===op && !suppressOpHighlight?' active':''}`}
               onClick={() => onOperationSelect(op)}
-              style={{fontSize:'11px', padding:'4px 6px'}}
+              style={{fontSize:'11px', padding:'4px 2px', flex:'1 1 30%', whiteSpace:'nowrap'}}
             >
               {op}
             </button>
@@ -539,189 +104,183 @@ export default function SymmetryControls({
           {improperOps.map(op => (
             <button
               key={op}
-              className={`mode-btn${selectedOperation===op?' active':''}`}
+              className={`mode-btn${selectedOperation===op && !suppressOpHighlight?' active':''}`}
               onClick={() => onOperationSelect(op)}
-              style={{fontSize:'11px', padding:'4px 6px'}}
+              style={{fontSize:'11px', padding:'4px 2px', flex:'1 1 30%'}}
             >
-              {op}
+              <OverbarLabel text={op} />
             </button>
           ))}
         </div>
       </div>
 
-      {/* Step Mode for All Operations */}
+      {/* Step-by-Step toggle: off by default (operations apply immediately
+          on selection below); switching this on resets to the default
+          starting position and reveals the step-building controls. */}
       <div style={{marginBottom:8}}>
-        <span className="ctrl-label">Application Mode</span>
+        <span className="ctrl-label">{t('labelApplicationMode')}</span>
         <div className="mode-toggle">
-          <button className={`mode-btn${!stepMode?' active':''}`} onClick={() => {
-            onStepMode(false);
-            onOperationSelect('1'); // Reset to identity
-            onSavedAtomsChange([]); // Clear saved atoms
-            onBasePointChange([...startPoint]); // Reset to starting point
-            onPreviewAtomChange(null); // Clear preview
-          }}>Direct</button>
-          <button className={`mode-btn${stepMode?' active':''}`} onClick={() => {
-            onStepMode(true);
-            onOperationSelect('1'); // Reset to identity
-            onSavedAtomsChange([]); // Clear saved atoms
-            onBasePointChange([...startPoint]); // Reset to starting point
-            onPreviewAtomChange(null); // Clear preview
-          }}>Step-by-Step</button>
+          <button className={`mode-btn${stepMode?' active':''}`} onClick={onStepModeToggle}>{t('modeStepByStep')}</button>
         </div>
         {stepMode && (
           <div style={{marginTop:4, fontSize:'11px', color:'var(--dim)'}}>
-            Step {currentStep}: {currentStep === 1 ? 'Apply operation' : 'Show result'}
+            {t('logStepLabel', { n: currentStep })}: {currentStep === 1 ? t('stepApplyOperation') : t('stepShowResult')}
           </div>
         )}
       </div>
+
+      {/* Rotation axis picker — only in Step-by-Step mode, applies to whichever operation is selected */}
+      {stepMode && (
+        <div style={{marginBottom:8}}>
+          <span className="ctrl-label">{t('labelRotationAxis')}</span>
+          <div className="mode-toggle">
+            {['a','b','c'].map(ax => (
+              <button
+                key={ax}
+                className={`mode-btn${selectedAxis===ax && !axisAutoSynced?' active':''}`}
+                onClick={() => onAxisSelect(ax)}
+              >
+                {{ a: 'x', b: 'y', c: 'z' }[ax]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Visual separator */}
-      <hr style={{border:'none', borderTop:'1px solid var(--border)', margin:'12px 0'}} />
+      {/* Everything below is only relevant while building up a rotation
+          step by step — selecting an operation above already shows its
+          full result immediately, so no parameters are needed otherwise. */}
+      {stepMode && (
+        <>
+          <hr style={{border:'none', borderTop:'1px solid var(--border)', margin:'12px 0'}} />
 
-      {/* Animation Speed Control */}
-      <div style={{marginBottom:8}}>
-        <span className="ctrl-label">Animation Speed</span>
-        <div className="mode-toggle">
-          <button className={`mode-btn${animationSpeed === 'slow' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('slow')}>Slow</button>
-          <button className={`mode-btn${animationSpeed === 'normal' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('normal')}>Normal</button>
-          <button className={`mode-btn${animationSpeed === 'fast' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('fast')}>Fast</button>
-        </div>
-      </div>
-
-      {/* Angle Selector UI */}
-      <div style={{marginBottom:8, padding:'8px', border:'1px solid var(--border)', borderRadius:'4px', background:'var(--panel-bg)'}}>
-        <div style={{fontSize:'11px', fontWeight:500, color:'var(--text)', marginBottom:6}}>Angle</div>
-        
-        {angleMode === 'preset' ? (
-          <>
-            <div className="mode-toggle" style={{flexWrap:'wrap', gap:4, marginBottom:6}}>
-              {[60, 90, 120, 180].map(angle => (
-                <button
-                  key={angle}
-                  className={`mode-btn${selectedAngle === angle ? ' active' : ''}`}
-                  onClick={() => onAngleChange(angle)}
-                  style={{fontSize:'11px', padding:'4px 8px', flex: '1 1 22%'}}
-                >
-                  {angle}°
-                </button>
-              ))}
+          {/* Animation Speed Control */}
+          <div style={{marginBottom:8}}>
+            <span className="ctrl-label">{t('labelAnimSpeed')}</span>
+            <div className="mode-toggle">
+              <button className={`mode-btn${animationSpeed === 'slow' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('slow')}>{t('speedSlow')}</button>
+              <button className={`mode-btn${animationSpeed === 'normal' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('normal')}>{t('speedNormal')}</button>
+              <button className={`mode-btn${animationSpeed === 'fast' ? ' active' : ''}`} onClick={() => onAnimationSpeedChange('fast')}>{t('speedFast')}</button>
             </div>
-            <button
-              onClick={() => onAngleModeChange('custom')}
-              style={{width:'100%', padding:'4px', fontSize:'10px', color:'var(--dim)', background:'transparent', border:'none', cursor:'pointer', textDecoration:'underline'}}
-            >
-              Custom angle ▾
-            </button>
-          </>
-        ) : (
-          <>
-            <div style={{display:'flex', gap:4, marginBottom:6}}>
-              <input
-                type="number"
-                min="1"
-                max="359"
-                value={selectedAngle}
-                onChange={e => onAngleChange(Math.max(1, Math.min(359, Number(e.target.value) || 0)))}
-                onBlur={e => {
-                  const val = Number(e.target.value);
-                  if (val < 1 || val > 359) onAngleChange(120);
-                }}
-                style={{flex:1, padding:'4px', border:'1px solid var(--border)', borderRadius:'4px', fontSize:'12px'}}
-              />
-              <span style={{padding:'4px 8px', fontSize:'11px', color:'var(--dim)'}}>°</span>
-            </div>
-            <button
-              onClick={() => onAngleModeChange('preset')}
-              style={{width:'100%', padding:'4px', fontSize:'10px', color:'var(--dim)', background:'transparent', border:'none', cursor:'pointer', textDecoration:'underline'}}
-            >
-              Use preset ▴
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Dual Operation Buttons */}
-      <div className="ops-row" style={{marginBottom:6, gap:6}}>
-        <button
-          className="mode-btn"
-          onClick={() => {
-            try {
-              onApplyRotation(selectedAngle);
-            } catch (error) {
-              console.error('SymmetryControls: error in onApplyRotation', error);
-              alert(`Error applying rotation: ${error.message || 'Unknown error occurred'}`);
-            }
-          }}
-          style={{flex:1, background:'#378ADD', display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:'11px'}}
-        >
-          ↻ Rotate {selectedAngle}°
-        </button>
-        <button
-          className="mode-btn"
-          onClick={() => {
-            try {
-              onApplyInversion();
-            } catch (error) {
-              console.error('SymmetryControls: error in onApplyInversion', error);
-              alert(`Error applying inversion: ${error.message || 'Unknown error occurred'}`);
-            }
-          }}
-          style={{flex:1, background:'#c8921a', display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:'11px'}}
-        >
-          ⊙ Inversion
-        </button>
-      </div>
-
-      {/* Confirm Bar Container (Fixed Height) */}
-      <div style={{ minHeight: '0px', transition: 'min-height 0.2s ease' }}>
-      </div>
-
-      {/* Operation Buttons (Reset, Undo, Back, Save) */}
-      <div className="ops-row" style={{marginBottom:6, flexWrap:'wrap', gap: 6}}>
-        <button className="mode-btn" onClick={onReset} style={{fontSize:'11px'}}>{t('symReset')}</button>
-        <button className="mode-btn" onClick={onUndo} style={{fontSize:'11px'}} disabled={operationsLog.length === 0}>{t('symUndo')}</button>
-        <button
-          className="mode-btn"
-          onClick={onBack}
-          style={{fontSize:'11px', opacity: savedAtoms?.length > 0 ? 1 : 0.4, cursor: savedAtoms?.length > 0 ? 'pointer' : 'not-allowed'}}
-          disabled={!savedAtoms || savedAtoms.length === 0}
-        >
-          ← Back
-        </button>
-        <button
-          className="mode-btn"
-          onClick={onSavePosition}
-          style={{fontSize:'11px', background:'#28a745', color:'white'}}
-        >
-          ✓ Save Position
-        </button>
-        {!stepMode && (
-          <button className="mode-btn" onClick={() => onApplyOperation(selectedOperation, null)} style={{flex:1, background:'#378add', fontSize:'11px'}}>{t('symApply')}</button>
-        )}
-      </div>
-
-      {/* Enhanced Operations Log */}
-      {operationsLog && operationsLog.length > 0 && (
-        <div style={{marginTop:8, padding:'8px', border:'1px solid var(--border)', borderRadius:'4px', maxHeight:'150px', overflowY:'auto', fontSize:'10px'}}>
-          <div style={{fontWeight:500, marginBottom:4, color:'var(--text)', fontSize:'11px'}}>Operations Log</div>
-          <div style={{marginBottom:6, padding:'4px', background:'var(--panel-bg)', borderRadius:'3px', fontSize:'10px', color:'var(--dim)'}}>
-            Current point: ({basePoint[0].toFixed(2)}, {basePoint[1].toFixed(2)}, {basePoint[2].toFixed(2)})
           </div>
-          {operationsLog.slice(0,10).map((entry,i) => (
-            <div key={i} style={{fontSize:'10px', padding:'3px 0', borderBottom:'0.5px solid var(--border)', color:'var(--dim)', lineHeight:'1.3'}}>
-              {entry.step ? `Step ${entry.step}` : `Op ${i+1}`} | <span style={{fontWeight:500}}>{entry.operation || entry.description}</span>
-              {entry.from && entry.to && ` | ${entry.from} → ${entry.to}`}
-              {entry.isAbovePlane !== undefined && ` | ${entry.isAbovePlane ? '×' : '○'}`}
-            </div>
-          ))}
-        </div>
+
+          {/* Angle Selector UI */}
+          <div style={{marginBottom:8, padding:'8px', border:'1px solid var(--border)', borderRadius:'4px', background:'var(--panel-bg)'}}>
+            <div style={{fontSize:'11px', fontWeight:500, color:'var(--text)', marginBottom:6}}>{t('labelAngle')}</div>
+
+            {angleMode === 'preset' ? (
+              <>
+                <div className="mode-toggle" style={{flexWrap:'wrap', gap:4, marginBottom:6}}>
+                  {[60, 90, 120, 180].map(angle => (
+                    <button
+                      key={angle}
+                      className={`mode-btn${selectedAngle === angle ? ' active' : ''}`}
+                      onClick={() => onAngleChange(angle)}
+                      style={{fontSize:'11px', padding:'4px 8px', flex: '1 1 22%'}}
+                    >
+                      {angle}°
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => onAngleModeChange('custom')}
+                  style={{width:'100%', padding:'4px', fontSize:'10px', color:'var(--dim)', background:'transparent', border:'none', cursor:'pointer', textDecoration:'underline'}}
+                >
+                  {t('btnCustomAngle')}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{display:'flex', gap:4, marginBottom:6}}>
+                  <input
+                    type="number"
+                    min="1"
+                    max="359"
+                    value={selectedAngle}
+                    onChange={e => onAngleChange(Math.max(1, Math.min(359, Number(e.target.value) || 0)))}
+                    onBlur={e => {
+                      const val = Number(e.target.value);
+                      if (val < 1 || val > 359) onAngleChange(120);
+                    }}
+                    style={{flex:1, padding:'4px', border:'1px solid var(--border)', borderRadius:'4px', fontSize:'12px'}}
+                  />
+                  <span style={{padding:'4px 8px', fontSize:'11px', color:'var(--dim)'}}>°</span>
+                </div>
+                <button
+                  onClick={() => onAngleModeChange('preset')}
+                  style={{width:'100%', padding:'4px', fontSize:'10px', color:'var(--dim)', background:'transparent', border:'none', cursor:'pointer', textDecoration:'underline'}}
+                >
+                  {t('btnUsePreset')}
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Dual Operation Buttons */}
+          <div className="ops-row" style={{marginBottom:6, gap:6}}>
+            <button
+              className="mode-btn"
+              onClick={() => {
+                try {
+                  onApplyRotation(selectedAngle);
+                } catch (error) {
+                  console.error('SymmetryControls: error in onApplyRotation', error);
+                  alert(`Error applying rotation: ${error.message || 'Unknown error occurred'}`);
+                }
+              }}
+              style={{flex:1, background:'#378ADD', display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:'11px'}}
+            >
+              ↻ {t('btnRotate')} {selectedAngle}°
+            </button>
+            <button
+              className="mode-btn"
+              onClick={() => {
+                try {
+                  onApplyInversion();
+                } catch (error) {
+                  console.error('SymmetryControls: error in onApplyInversion', error);
+                  alert(`Error applying inversion: ${error.message || 'Unknown error occurred'}`);
+                }
+              }}
+              style={{flex:1, background:'#c8921a', display:'flex', alignItems:'center', justifyContent:'center', gap:4, fontSize:'11px'}}
+            >
+              ⊙ {t('labelInversion')}
+            </button>
+          </div>
+        </>
+      )}
+
+      {stepMode && (
+        <>
+          {/* Operation Buttons (Reset, Undo, Back, Save) */}
+          <div className="ops-row" style={{marginBottom:6, flexWrap:'wrap', gap: 6}}>
+            <button className="mode-btn" onClick={onReset} style={{fontSize:'11px'}}>{t('symReset')}</button>
+            <button className="mode-btn" onClick={onUndo} style={{fontSize:'11px'}} disabled={operationsLog.length === 0}>{t('symUndo')}</button>
+            <button
+              className="mode-btn"
+              onClick={onBack}
+              style={{fontSize:'11px', opacity: savedAtoms?.length > 0 ? 1 : 0.4, cursor: savedAtoms?.length > 0 ? 'pointer' : 'not-allowed'}}
+              disabled={!savedAtoms || savedAtoms.length === 0}
+            >
+              {t('btnBack')}
+            </button>
+            <button
+              className="mode-btn"
+              onClick={onSavePosition}
+              style={{fontSize:'11px', background:'#28a745', color:'white'}}
+            >
+              {t('btnSavePosition')}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
 // ── Stereographic Projection Canvas Component ────────────────────────────────
-export function StereographicProjection({ selectedOperation, operationsLog, startPoint, savedAtoms, previewAtom, currentBasePoint, projectionZoom = 1, onProjectionZoomChange = () => {} }) {
+export function StereographicProjection({ t, selectedOperation, operationsLog, startPoint, savedAtoms, previewAtom, currentBasePoint, stepMode, projectionZoom = 1, onProjectionZoomChange = () => {} }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
 
@@ -750,6 +309,15 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
     const baseRadius = Math.max(24, Math.min(centerX, centerY) - 20);
     const radius = baseRadius * projectionZoom;
 
+    // Marker symbol size and line width scale with the circle's current
+    // radius (a percentage, not a fixed pixel count) so × / ○ markers
+    // shrink proportionally as the window/panel is resized — matching how
+    // markers in the 3D view stay proportionally consistent with the scene
+    // instead of becoming relatively oversized in a smaller window.
+    const markerCrossSize = radius * 0.06;
+    const markerCircleSize = radius * 0.07;
+    const markerLineWidth = Math.max(1.5, radius * 0.024);
+
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
 
@@ -759,6 +327,52 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
     ctx.stroke();
+
+    // Fixed axis-orientation legend, top-left corner of the white square:
+    // horizontal = b, vertical = a, out-of-page (toward viewer) = c.
+    {
+      const ox = 32, oy = 32, armLen = 28, headLen = 6;
+      ctx.save();
+      ctx.strokeStyle = '#000';
+      ctx.fillStyle = '#000';
+      ctx.lineWidth = 1.5;
+      ctx.font = 'bold 12px Arial';
+
+      const drawAxisArrow = (dx, dy, label, labelDx, labelDy) => {
+        const tx = ox + dx, ty = oy + dy;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        const ang = Math.atan2(ty - oy, tx - ox);
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx - headLen * Math.cos(ang - Math.PI / 6), ty - headLen * Math.sin(ang - Math.PI / 6));
+        ctx.lineTo(tx - headLen * Math.cos(ang + Math.PI / 6), ty - headLen * Math.sin(ang + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, tx + labelDx, ty + labelDy);
+      };
+
+      drawAxisArrow(armLen, 0, 'y', 10, 0);  // horizontal → b (right)
+      drawAxisArrow(0, armLen, 'x', 0, 10);  // vertical → a (down)
+
+      // c: toward viewer, drawn as a circled dot at the corner where a/b
+      // originate (standard out-of-page symbol)
+      ctx.beginPath();
+      ctx.arc(ox, oy, 5, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ox, oy, 1.6, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('z', ox - 8, oy - 8);
+
+      ctx.restore();
+    }
 
     // Draw axis indicators
     if (selectedOperation === '2̄//Oy') {
@@ -794,40 +408,41 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
       ctx.fillText(symbol, centerX, centerY);
     }
 
-    let cylinderAxis = 'c';
-    if (selectedOperation.includes('Oy')) cylinderAxis = 'b';
-    if (selectedOperation.includes('Ox')) cylinderAxis = 'a';
+    // Always project onto the a–b (xy) plane, with c pointing toward the
+    // viewer — the stereographic circle should always represent that same
+    // fixed plane, regardless of which operation/axis is currently selected.
+    const cylinderAxis = 'c';
+
+    // Pull marker positions in a bit from the true projected radius so a
+    // point lying exactly in the equatorial plane (height=0) doesn't render
+    // right on top of the circle's border stroke.
+    const MARKER_INSET = 0.9;
 
     const projectPoint = (point) => {
       const [x, y, z] = Array.isArray(point) ? point : [point.x, point.y, point.z];
       if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
 
-      let planeX, planeY, height;
-      if (cylinderAxis === 'c') {
-        planeX = x;
-        planeY = y;
-        height = z;
-      } else if (cylinderAxis === 'b') {
-        planeX = x;
-        planeY = z;
-        height = y;
-      } else {
-        planeX = y;
-        planeY = z;
-        height = x;
-      }
+      // Horizontal screen axis = b (y), vertical screen axis = a (x), with a
+      // pointing down the screen — this keeps (a,b,c) a right-handed set
+      // given b = right and c = toward the viewer (b × c = a).
+      const planeX = y, planeY = -x, height = z;
 
       const r_plane = Math.sqrt(planeX * planeX + planeY * planeY);
       const r_total = Math.sqrt(planeX * planeX + planeY * planeY + height * height);
       if (r_total === 0) return null;
 
       const zn = height / r_total;
-      const projRadius = (radius * r_plane) / (r_total + (zn >= 0 ? height : -height));
+      // Treat -0 as the negative side, not the positive one: JS evaluates
+      // `-0 >= 0` as true, which would otherwise draw an inverted point
+      // (whose z can become exactly -0 when the original was +0) as
+      // "above" again instead of on the opposite side of the plane.
+      const znIsAbove = !Object.is(zn, -0) && zn >= 0;
+      const projRadius = ((radius * r_plane) / (r_total + (znIsAbove ? height : -height))) * MARKER_INSET;
       const angle = Math.atan2(planeY, planeX);
       const px = centerX + projRadius * Math.cos(angle);
       const py = centerY - projRadius * Math.sin(angle);
 
-      return { px, py, isAbove: zn >= 0 };
+      return { px, py, isAbove: znIsAbove };
     };
 
     const drawCross = (px, py, size = 10, color = '#ff0000', lineWidth = 4, fill = null) => {
@@ -863,8 +478,8 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
 
     const drawAtomPoint = (projection) => {
       if (!projection) return;
-      if (projection.isAbove) drawCross(projection.px, projection.py, 10, '#ff0000', 4);
-      else drawCircle(projection.px, projection.py, 12, '#ff0000', 4);
+      if (projection.isAbove) drawCross(projection.px, projection.py, markerCrossSize, '#ff0000', markerLineWidth);
+      else drawCircle(projection.px, projection.py, markerCircleSize, '#ff0000', markerLineWidth);
     };
 
     if (savedAtoms && Array.isArray(savedAtoms) && savedAtoms.length > 0) {
@@ -874,27 +489,60 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
       });
     }
 
-    if (effectivePoint) {
+    // While Rotate/Inversion is animating, effectivePoint is deliberately
+    // still the OLD (pre-animation) position — only previewAtom moves. Skip
+    // drawing effectivePoint's own marker for as long as previewAtom has
+    // visibly diverged from it, so only the single animating marker (drawn
+    // below) is shown instead of two — the frozen starting mark plus the
+    // one sweeping past it. Inversion suppresses it for the whole animation
+    // (progress 0 included) since the animated marker sits at that exact
+    // spot at t=0 too.
+    const isAnimatingAway = previewAtom && previewAtom.isPreview && (previewAtom.isInversion || (() => {
+      const [ax, ay, az] = Array.isArray(previewAtom) ? previewAtom : [previewAtom.x, previewAtom.y, previewAtom.z];
+      const [bx, by, bz] = Array.isArray(effectivePoint) ? effectivePoint : [effectivePoint.x, effectivePoint.y, effectivePoint.z];
+      return Math.abs(ax - bx) >= 1e-6 || Math.abs(ay - by) >= 1e-6 || Math.abs(az - bz) >= 1e-6;
+    })());
+
+    if (effectivePoint && !isAnimatingAway) {
       const proj = projectPoint(effectivePoint);
       if (proj) {
         const baseFill = 'rgba(255,0,0,0.15)';
         if (proj.isAbove) {
-          drawCross(proj.px, proj.py, 10, '#ff0000', 4, baseFill);
+          drawCross(proj.px, proj.py, markerCrossSize, '#ff0000', markerLineWidth, baseFill);
         } else {
-          drawCircle(proj.px, proj.py, 12, '#ff0000', 4, baseFill);
+          drawCircle(proj.px, proj.py, markerCircleSize, '#ff0000', markerLineWidth, baseFill);
         }
       }
     }
 
-    const animatedPoint = (previewAtom && previewAtom.isPreview) ? previewAtom : null;
-    if (animatedPoint) {
-      const isAlreadySaved = savedAtoms.some(saved => {
-        const [ax, ay, az] = Array.isArray(animatedPoint) ? animatedPoint : [animatedPoint.x, animatedPoint.y, animatedPoint.z];
-        return Math.abs(saved.x - ax) < 1e-6 && Math.abs(saved.y - ay) < 1e-6 && Math.abs(saved.z - az) < 1e-6;
-      });
-      if (!isAlreadySaved) {
-        const proj = projectPoint(animatedPoint);
-        drawAtomPoint(proj);
+    if (previewAtom && previewAtom.isInversion) {
+      // Map only the well-defined start point once, then slide in a
+      // straight line to its exact reflection through the circle's center —
+      // re-projecting intermediate raw coordinates (which pass near the
+      // origin, where direction/angle is undefined) made the marker jump
+      // around instead of sliding smoothly through the middle.
+      const startProj = projectPoint(previewAtom.from);
+      if (startProj) {
+        const progress = previewAtom.progress ?? 1;
+        const endPx = 2 * centerX - startProj.px;
+        const endPy = 2 * centerY - startProj.py;
+        const px = startProj.px + (endPx - startProj.px) * progress;
+        const py = startProj.py + (endPy - startProj.py) * progress;
+        const isAbove = progress < 0.5 ? startProj.isAbove : !startProj.isAbove;
+        if (isAbove) drawCross(px, py, markerCrossSize, '#ff0000', markerLineWidth);
+        else drawCircle(px, py, markerCircleSize, '#ff0000', markerLineWidth);
+      }
+    } else {
+      const animatedPoint = (previewAtom && previewAtom.isPreview) ? previewAtom : null;
+      if (animatedPoint) {
+        const isAlreadySaved = savedAtoms.some(saved => {
+          const [ax, ay, az] = Array.isArray(animatedPoint) ? animatedPoint : [animatedPoint.x, animatedPoint.y, animatedPoint.z];
+          return Math.abs(saved.x - ax) < 1e-6 && Math.abs(saved.y - ay) < 1e-6 && Math.abs(saved.z - az) < 1e-6;
+        });
+        if (!isAlreadySaved) {
+          const proj = projectPoint(animatedPoint);
+          drawAtomPoint(proj);
+        }
       }
     }
 
@@ -911,14 +559,18 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
       drawAtomPoint(proj);
     });
 
-    if (op && effectivePoint) {
-      const previewPoints = generateOrbitPoints(effectivePoint, op);
+    // Direct mode only: show the full computed orbit for the selected
+    // operation. Step-by-Step already draws effectivePoint/previewAtom
+    // individually above — drawing the operation's orbit here too would
+    // re-plot the same (stale, pre-animation) point a second time.
+    if (!stepMode && op && effectivePoint) {
+      const previewPoints = generateOrbitPoints(effectivePoint, op, selectedOperation);
       previewPoints.forEach(point => {
         const proj = projectPoint(point);
         drawAtomPoint(proj);
       });
     }
-  }, [selectedOperation, operationsLog, startPoint, savedAtoms, previewAtom, currentBasePoint, projectionZoom, effectivePoint]);
+  }, [selectedOperation, startPoint, savedAtoms, previewAtom, projectionZoom, effectivePoint, stepMode]);
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -946,18 +598,22 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
   }, [drawProjection]);
 
   // Helper function to generate orbit points
-  const generateOrbitPoints = (startPoint, operation) => {
+  const generateOrbitPoints = (startPoint, operation, operationKey) => {
     const points = [startPoint];
 
-    if (operation.positions === 1) {
+    if (operation.order === 1) {
       return points; // Identity only
     }
 
     let currentPoint = startPoint;
-    for (let i = 1; i < operation.positions; i++) {
+    for (let i = 1; i < operation.order; i++) {
       currentPoint = operation.transform(...currentPoint);
       points.push(currentPoint);
     }
+
+    // 2̄//Oz is explicitly exempted from dedup — see the matching note in
+    // AppShell.jsx's generateOrbitPoints for why.
+    if (operationKey === '2̄//Oz') return points;
 
     // Remove duplicates
     return points.filter((point, index, arr) => {
@@ -980,7 +636,7 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
     const onWheel = (e) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.05 : 0.05;
-      onProjectionZoomChange(prev => Math.min(3, Math.max(0.5, prev + delta)));
+      onProjectionZoomChange(prev => Math.min(10, Math.max(0.1, prev + delta)));
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -1000,15 +656,8 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
   }, [resizeCanvas]);
 
   return (
-    <div style={{padding:16, background:'var(--panel)', borderRadius:8, border:'1px solid var(--border)'}}>
-      <h3 style={{margin:'0 0 12px 0', fontSize:'14px', color:'var(--text)'}}>Stereographic Projection</h3>
-      <div style={{display:'flex', gap:8, alignItems:'center', marginBottom:8}}>
-        <button className='mode-btn' onClick={() => onProjectionZoomChange(prev => Math.min(3, Math.max(0.5, prev + 0.1)))}>+ Zoom</button>
-        <button className='mode-btn' onClick={() => onProjectionZoomChange(prev => Math.min(3, Math.max(0.5, prev - 0.1)))}>- Zoom</button>
-        <button className='mode-btn' onClick={() => onProjectionZoomChange(1)}>Reset</button>
-        <span style={{marginLeft:'auto', color:'var(--dim)', fontSize:'0.75rem'}}>Zoom {Math.round(projectionZoom * 100)}%</span>
-      </div>
-      <div ref={containerRef} style={{width:'100%', height:'calc(100% - 90px)', minHeight:260, display:'flex', justifyContent:'center', alignItems:'center'}}>
+    <div style={{padding:16, background:'var(--panel)', borderRadius:8, border:'1px solid var(--border)', flex:1, minHeight:0, display:'flex', flexDirection:'column'}}>
+      <div ref={containerRef} style={{width:'100%', flex:1, minHeight:0, display:'flex', justifyContent:'center', alignItems:'center', position:'relative'}}>
       <canvas
         id="stereo-canvas"
         ref={canvasRef}
@@ -1017,10 +666,8 @@ export function StereographicProjection({ selectedOperation, operationsLog, star
         style={{border:'1px solid var(--border)', borderRadius:4, background:'white', width:'100%', height:'100%', maxWidth:'100%', maxHeight:'100%'}}
       />
       </div>
-      <div style={{marginTop:8, fontSize:'11px', color:'var(--dim)'}}>
-        <div>× = Above plane (red crosses)</div>
-        <div>○ = Below plane (blue circles)</div>
-        {operationsLog.length === 0 && <div style={{marginTop:4, fontStyle:'italic'}}>Select an operation to see preview</div>}
+      <div style={{marginTop:8, fontSize:'11px', color:'var(--dim)', flexShrink:0}}>
+        <div>{t('captionAboveBelow')}</div>
       </div>
     </div>
   );

@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { STRUCTS } from '@/lib/structs';
-import { TRANSLATIONS } from '@/lib/translations';
+import { STRUCTS, CUBIC_STRUCT_KEYS } from '@/lib/structs';
+import { TRANSLATIONS, STRUCT_NAME_KEY, PARAM_TRANSLATIONS_FR, EXAMPLES_TRANSLATIONS_FR, RRATIO_TRANSLATIONS_FR } from '@/lib/translations';
+import { SYMMETRY_OPERATIONS, getEffectiveOperation } from '@/lib/symmetryOperations';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import FeedbackModal from '@/components/FeedbackModal';
@@ -19,16 +20,51 @@ const CS = 4.0;
 const SF = CS / 4.0;
 const SF_METAL = CS * 0.5;
 
+// Default symmetry starting point: -60° from the y-axis, radius 0.25,
+// z = 0 — i.e. [x, y, z] = [r·sin(-60°), r·cos(-60°), 0], derived rather
+// than hardcoded so the angle/radius it represents stays self-documenting.
+const DEFAULT_SYMMETRY_POINT = [0.25 * Math.sin(-Math.PI / 3), 0.25 * Math.cos(-Math.PI / 3), 0];
+
+// Treats -0 as the negative side, not the positive one. JavaScript's
+// `-0 >= 0` evaluates true, which matters here because inversion negates
+// coordinates directly (e.g. z=0 becomes z=-0) — without this, an inverted
+// point starting exactly on a cap/mirror boundary would be placed back on
+// the SAME side as its original instead of the opposite side, breaking the
+// symmetry of the inversion line and the inverted marker's position.
+function isNonNegativeSide(value) {
+  return !Object.is(value, -0) && value >= 0;
+}
+
+// For these two operations specifically, the 3D Cylinder View's
+// cross-section-normal axis is deliberately displayed as z instead of the
+// operation's own rotation axis (y) — a presentation choice for a clearer
+// schematic, independent of the underlying math: the actual
+// rotation/mirror still correctly happens around y via `selectedAxis`,
+// only where atoms/markers land on the schematic cylinder's rim changes.
+const CYLINDER_AXIS_DISPLAY_OVERRIDE = { '2//Oy': 'c', '2̄//Oy': 'c' };
+function getDisplayCylinderAxis(operationKey, axis) {
+  return CYLINDER_AXIS_DISPLAY_OVERRIDE[operationKey] || axis || 'c';
+}
+
 const SF_RADII = {
   sc:      [2.00,2.00,2.00,2.00,2.00,2.00,2.00,2.00],
   bcc:     [1.73,1.73,1.73,1.73,1.73,1.73,1.73,1.73,1.73],
   fcc:     [1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41,1.41],
-  hcp:     [1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638,1.7638],
-  cscl:    [1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,0.93],
-  nacl:    [1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.81,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02,1.02],
-  zns:     [1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,1.84,0.74,0.74,0.74,0.74],
-  caf2:    [1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.00,1.33,1.33,1.33,1.33,1.33,1.33,1.33,1.33],
-  diamond: [0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77,0.77],
+  hcp:     [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0],
+  // The four ionic compounds and diamond keep the *real* relative ion-size
+  // ratio (from their Shannon ionic / covalent radii) but rescaled so the two
+  // species touch exactly at the true nearest-neighbor distance implied by
+  // this app's own drawing scale (CS=4), i.e. the same distance already
+  // shown in each structure's `param` row (a/2, a√3/2, a√3/4). Previously
+  // these tables used the raw real-world Å radii unscaled, which — since the
+  // app's cell size isn't real Ångströms — made CsCl look far too small/gapped
+  // and NaCl/ZnS/CaF₂ look overlapped; CsCl's values didn't even match the
+  // structure's own Cs/Cl radii used in Ball & Stick mode.
+  cscl:    [1.6624,1.6624,1.6624,1.6624,1.6624,1.6624,1.6624,1.6624,1.8017],
+  nacl:    [1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,1.2792,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208,0.7208],
+  zns:     [1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,1.2353,0.4968,0.4968,0.4968,0.4968],
+  caf2:    [0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.7434,0.9887,0.9887,0.9887,0.9887,0.9887,0.9887,0.9887,0.9887],
+  diamond: [0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660,0.8660],
   tet_p:   [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0],
   tet_i:   [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0],
   ort_p:   [2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0],
@@ -90,14 +126,6 @@ function worldPos(f, ox, oy, oz, s) {
 
 function fmt(n) {
   return n < 0 ? `${Math.abs(n)}̄` : String(n);
-}
-
-function getShortestEdge(s) {
-  if (s.lv) {
-    const lens = s.lv.map(v => Math.sqrt(v[0]**2+v[1]**2+v[2]**2));
-    return Math.min(...lens);
-  }
-  return CS * Math.min(s.ax||1, s.ay||1, s.az||1);
 }
 
 function getAxisVector(s, axis) {
@@ -180,14 +208,25 @@ export default function AppShell() {
   const [galleryCellSize, setGalleryCellSize] = useState(1);
 
   // ── Symmetry controls ──
-  const [symmetryPoint, setSymmetryPoint] = useState([0.25, 0.25, 0.25]);
+  const [symmetryPoint, setSymmetryPoint] = useState(DEFAULT_SYMMETRY_POINT);
   const [selectedOperation, setSelectedOperation] = useState('1');
+  const [selectedAxis, setSelectedAxis] = useState('c'); // single source of truth for which physical axis (a/b/c) the current operation rotates about
   const [operationsLog, setOperationsLog] = useState([]);
   const [stepMode, setStepMode] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  // True right after entering Step-by-Step, before the user has explicitly
+  // picked an operation — suppresses the "1" button's active highlight so it
+  // doesn't look clicked when only the default point is being shown.
+  const [stepFreshEntry, setStepFreshEntry] = useState(false);
+  // True whenever selectedAxis was set as a side effect of picking an
+  // operation (not by explicitly clicking the Rotation Axis picker) — the
+  // two subsections stay visually independent: picking an operation never
+  // lights up an x/y/z button, and using the axis picker never lights up a
+  // Select Operation button.
+  const [axisAutoSynced, setAxisAutoSynced] = useState(true);
   
   // ── New symmetry feature: manual step-by-step construction ──
-  const [currentBasePoint, setCurrentBasePoint] = useState([0.25, 0.25, 0.25]);
+  const [currentBasePoint, setCurrentBasePoint] = useState(DEFAULT_SYMMETRY_POINT);
   const [savedAtoms, setSavedAtoms] = useState([]);
   const [previewAtom, setPreviewAtom] = useState(null);
   const [selectedAngle, setSelectedAngle] = useState(120);
@@ -217,8 +256,10 @@ export default function AppShell() {
   const lxRef         = useRef(0);
   const lyRef         = useRef(0);
   const autoRotRef    = useRef(true);
+  const currentTabRef = useRef('struct');
   const orbitTargetRef= useRef(new THREE.Vector3());
   const rafRef        = useRef(null);
+  const resizeObserverRef = useRef(null);
   const axLblXRef     = useRef(null);
   const axLblYRef     = useRef(null);
   const axLblZRef     = useRef(null);
@@ -227,6 +268,7 @@ export default function AppShell() {
   // ── Symmetry-specific refs ──
   const symmetryAtomMeshesRef = useRef([]);  // Track all added atoms for removal
   const motionIndicatorRef = useRef(null);  // Track current motion indicator line/arrow
+  const symmetryAnimTokenRef = useRef(0);  // Invalidates in-flight rotation/inversion animations
 
   // Gallery refs
   const gRendererRef  = useRef(null);
@@ -236,6 +278,11 @@ export default function AppShell() {
 
   // Sync autoRot ref with state
   useEffect(() => { autoRotRef.current = autoRot; }, [autoRot]);
+  // updateAxisLabels() is also called from the render loop, whose closure is
+  // created once at mount ([] deps) and therefore permanently sees whatever
+  // `currentTab` was at that moment — reading it through a ref instead keeps
+  // every caller (loop included) looking at the live value.
+  useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
 
   // Theme persistence and document attribute
   useEffect(() => {
@@ -276,9 +323,13 @@ export default function AppShell() {
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
-  // ── Translation helper ──
-  const t = useCallback((key) => {
-    return (TRANSLATIONS[lang] || TRANSLATIONS.en)[key] || key;
+  // ── Translation helper ── (optional `vars` fills {placeholder} tokens, e.g. t('stepShowResult', { n: 2 }))
+  const t = useCallback((key, vars) => {
+    let str = (TRANSLATIONS[lang] || TRANSLATIONS.en)[key] || key;
+    if (vars) {
+      for (const [k, v] of Object.entries(vars)) str = str.replace(`{${k}}`, v);
+    }
+    return str;
   }, [lang]);
 
   // ── Three.js init ──────────────────────────────────────────────────────────
@@ -287,7 +338,7 @@ export default function AppShell() {
     if (!vp) return;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(vp.clientWidth, vp.clientHeight);
     renderer.setClearColor(theme === 'light' ? 0xf3f6ff : 0x07071a);
     vp.appendChild(renderer.domElement);
@@ -296,7 +347,7 @@ export default function AppShell() {
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, vp.clientWidth/vp.clientHeight, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(45, vp.clientWidth/vp.clientHeight, 0.1, 3000);
     cameraRef.current = camera;
 
     // Lighting
@@ -327,14 +378,21 @@ export default function AppShell() {
     gRendererRef.current = gRenderer;
 
     // Resize handler
-    // Resize handler with ResizeObserver for better responsive support
+    // Resize handler with ResizeObserver for better responsive support.
+    // Reads vpRef.current fresh on every call rather than closing over the
+    // mount-time `vp` — the Symmetry tab uses a different viewport <div> than
+    // the other tabs, and once that swap happens the mount-time node is
+    // detached from the DOM (clientWidth/Height read 0), so a stale reference
+    // here would silently no-op on every resize while symmetry-related layout
+    // changes (hiding the side panel, resizing the window) are in effect.
     const onResize = () => {
-      if (!vp) return;
-      const width = vp.clientWidth;
-      const height = vp.clientHeight;
+      const currentVp = vpRef.current;
+      if (!currentVp) return;
+      const width = currentVp.clientWidth;
+      const height = currentVp.clientHeight;
       if (width <= 0 || height <= 0) return;
       renderer.setSize(width, height);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       applyOrbit();
@@ -343,11 +401,14 @@ export default function AppShell() {
     };
     window.addEventListener('resize', onResize);
     
-    // Add ResizeObserver for responsive updates
+    // Add ResizeObserver for responsive updates. The Symmetry tab swaps in a
+    // different viewport <div> (vpRef points to a new DOM node), so this observer
+    // must be re-targeted on every tab switch — see the effect below.
     const resizeObserver = new ResizeObserver(() => {
       onResize();
     });
     resizeObserver.observe(vp);
+    resizeObserverRef.current = resizeObserver;
     
     // Handle orientation changes on mobile
     window.addEventListener('orientationchange', () => {
@@ -389,10 +450,22 @@ export default function AppShell() {
       const canvas = renderer.domElement;
       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
       vp.appendChild(canvas);
-      // Update renderer size
-      renderer.setSize(vp.clientWidth, vp.clientHeight);
-      camera.aspect = vp.clientWidth / vp.clientHeight;
-      camera.updateProjectionMatrix();
+    }
+    // Re-target the ResizeObserver at whatever container is current and refresh
+    // the size immediately: vpRef can point to a different DOM node depending on
+    // the tab (the Symmetry tab uses its own viewport <div>), and an observer
+    // bound to the previous node never fires again once that node is swapped out,
+    // so without this the canvas silently keeps its last known size on tab switch.
+    if (vp && renderer && camera) {
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current.observe(vp);
+      }
+      if (vp.clientWidth > 0 && vp.clientHeight > 0) {
+        renderer.setSize(vp.clientWidth, vp.clientHeight);
+        camera.aspect = vp.clientWidth / vp.clientHeight;
+        camera.updateProjectionMatrix();
+      }
     }
 
     if (currentTab === 'symmetry') {
@@ -477,9 +550,9 @@ export default function AppShell() {
     };
     const onWheel = (e) => {
       if (currentTab === 'symmetry') {
-        camDistRef.current = Math.max(3, Math.min(20, camDistRef.current + e.deltaY * 0.03));
+        camDistRef.current = Math.max(0.5, Math.min(600, camDistRef.current + e.deltaY * 0.03));
       } else {
-        camDistRef.current = Math.max(4, Math.min(55, camDistRef.current + e.deltaY * 0.03));
+        camDistRef.current = Math.max(0.5, Math.min(400, camDistRef.current + e.deltaY * 0.03));
       }
       applyOrbit(); e.preventDefault();
     };
@@ -509,8 +582,8 @@ export default function AppShell() {
           e.touches[0].clientY - e.touches[1].clientY
         );
         const scale = currentDist / pinchStartDistRef.current;
-        const minD = currentTab === 'symmetry' ? 3 : 4;
-        const maxD = currentTab === 'symmetry' ? 20 : 55;
+        const minD = 0.5;
+        const maxD = currentTab === 'symmetry' ? 600 : 400;
         camDistRef.current = Math.max(minD, Math.min(maxD, pinchStartCamDistRef.current / scale));
         applyOrbit();
         e.preventDefault();
@@ -547,7 +620,7 @@ export default function AppShell() {
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchmove', onTouchMove);
     };
-  }, []);
+  }, [currentTab]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -569,79 +642,24 @@ export default function AppShell() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [currentTab, setAutoRot, setShowBonds, setRenderMode]);
 
-  // ── Symmetry handlers ───────────────────────────────────────────────────
-  function handleOperationSelect(operation) {
-    setSelectedOperation(operation);
-  }
-
-  function handleSymmetryReset() {
-    setSymmetryPoint([0.25, 0.25, 0.25]);
-    setCurrentBasePoint([0.25, 0.25, 0.25]);
-    setSavedAtoms([]);
-    setOperationsLog([]);
-    setMotionIndicators([]);
-    setPreviewAtom(null);
-    setShowConfirmBar(false);
-    setCurrentStep(1);
-  }
-
-  function handleSymmetryUndo() {
-    if (operationsLog.length === 0) return;
-    
-    // Remove the last operation from the log
-    setOperationsLog(prev => prev.slice(0, -1));
-    
-    // If there are saved atoms, remove the last one
-    if (savedAtoms.length > 0) {
-      setSavedAtoms(prev => prev.slice(0, -1));
-      // Set currentBasePoint to the last remaining saved atom or initial point
-      if (savedAtoms.length > 1) {
-        setCurrentBasePoint(savedAtoms[savedAtoms.length - 2]);
-      } else {
-        setCurrentBasePoint([0.25, 0.25, 0.25]);
-      }
-    }
-    
-    // Remove the last motion indicator
-    if (motionIndicators.length > 0) {
-      setMotionIndicators(prev => prev.slice(0, -1));
-    }
-  }
-
-  function handleSymmetryBack() {
-    if (savedAtoms.length === 0) return;
-    
-    // Remove the last saved atom
-    const lastAtom = savedAtoms[savedAtoms.length - 1];
-    setSavedAtoms(prev => prev.slice(0, -1));
-    
-    // Set current position back to the last saved atom
-    if (savedAtoms.length > 1) {
-      setCurrentBasePoint(savedAtoms[savedAtoms.length - 2]);
-    } else {
-      setCurrentBasePoint([0.25, 0.25, 0.25]);
-    }
-    
-    // Remove corresponding operations and motion indicators
-    // This is a simplified version - in a full implementation you'd track which operations belong to which saved positions
-    setOperationsLog(prev => prev.slice(0, -1));
-    setMotionIndicators(prev => prev.slice(0, -1));
-  }
-
   // ── Update symmetry scene when motion indicators change ───────────────────
   useEffect(() => {
     if (currentTab === 'symmetry') {
       updateSymmetryScene(selectedOperation, symmetryPoint);
     }
-  }, [motionIndicators, selectedOperation, symmetryPoint, currentTab, savedAtoms, currentBasePoint, updateSymmetryScene]);
+    // updateSymmetryScene is a plain function recreated every render; depending on it
+    // would re-run this effect on every render regardless of the values below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [motionIndicators, selectedOperation, symmetryPoint, currentTab, savedAtoms, currentBasePoint]);
 
   // ── Axis Labels ────────────────────────────────────────────────────────────
   function updateAxisLabels() {
     const pts = axisLabelPts.current;
     const vp = vpRef.current;
     const camera = cameraRef.current;
-    const sg = currentTab === 'symmetry' ? symmetryGuideGroupRef.current || sceneGroupRef.current : sceneGroupRef.current;
-    if (!pts.X || !vp || !camera || !sg || (currentTab !== 'struct' && currentTab !== 'miller' && currentTab !== 'symmetry')) {
+    const tab = currentTabRef.current;
+    const sg = tab === 'symmetry' ? symmetryGuideGroupRef.current || sceneGroupRef.current : sceneGroupRef.current;
+    if (!pts.X || !vp || !camera || !sg || (tab !== 'struct' && tab !== 'miller' && tab !== 'symmetry')) {
       [axLblXRef, axLblYRef, axLblZRef].forEach(r => { if (r.current) r.current.style.display = 'none'; });
       return;
     }
@@ -692,21 +710,20 @@ export default function AppShell() {
 
   function tag(obj) { obj.userData.clab = true; return obj; }
 
-  function buildSymmetryGuide(sg, operationKey, startPoint, structKey) {
+  function buildSymmetryGuide(sg, operationKey, startPoint, structKey, axisOverride) {
     if (!sg) return;
 
     // Ensure the symmetry group is visible and ready for debug
     sg.visible = true;
 
-    const operation = SYMMETRY_OPERATIONS[operationKey];
+    const operation = getEffectiveOperation(operationKey, axisOverride);
     if (!operation) return;
 
     console.log('🔷 buildSymmetryGuide:', { operationKey, startPoint, structKey, childrenBefore: sg.children.length });
 
-    // Determine cylinder orientation based on operation
-    let cylinderAxis = 'c'; // Default to z-axis
-    if (operationKey.includes('Oy')) cylinderAxis = 'b'; // y-axis
-    if (operationKey.includes('Ox')) cylinderAxis = 'a'; // x-axis
+    // Determine cylinder orientation: whichever axis is currently selected
+    // (display-overridden for 2//Oy / 2̄//Oy — see getDisplayCylinderAxis)
+    const cylinderAxis = getDisplayCylinderAxis(operationKey, axisOverride);
 
     // Remove connecting guide lines; keep only sphere + planes/orientations for clean view
     // const axisMat = new THREE.LineBasicMaterial({ color: 0x6495ed, opacity: 0.3, transparent: true });
@@ -775,34 +792,42 @@ export default function AppShell() {
 
     // End caps are omitted because the cylinder itself is hidden; planes now represent orientation.
 
-    // Add atoms on cylinder rims based on operation
-    const atomRadius = 0.12 * CS;
-    const cylinderRadius = CS * 1.3;
-    const cylinderHalfHeight = CS * 1.5;
+    // Add atoms on cylinder rims based on operation — Direct mode only.
+    // Step-by-Step has its own dedicated renderer (updateSymmetryScene) that
+    // tracks the live point and saved checkpoints individually; drawing the
+    // operation's full default-position orbit here too would add an
+    // untracked gold sphere at the original point that never gets cleared
+    // as the user rotates away from it (this function only reruns when the
+    // operation/axis/point changes, not on every Step-by-Step rotation).
+    if (!stepMode) {
+      const atomRadius = 0.12 * CS;
+      const cylinderRadius = CS * 1.3;
+      const cylinderHalfHeight = CS * 1.5;
 
-    // Generate points for this operation and use all resulting orbit points (top/bottom based on sign)
-    const orbitPoints = generateOrbitPoints(startPoint, operation);
+      // Generate points for this operation and use all resulting orbit points (top/bottom based on sign)
+      const orbitPoints = generateOrbitPoints(startPoint, operation, operationKey);
 
-    // Use actual orbit point coordinates for 3D placement (correct 2//Oy/Oz etc)
-    orbitPoints.forEach((point, idx) => {
-      const proj = projectPointForAxis(point, cylinderAxis);
-      if (!proj) return;
-      const rim = mapProjectedToCylinderRim(proj, cylinderAxis, cylinderRadius, cylinderHalfHeight);
-      if (!rim) return;
+      // Use actual orbit point coordinates for 3D placement (correct 2//Oy/Oz etc)
+      orbitPoints.forEach((point, idx) => {
+        const proj = projectPointForAxis(point, cylinderAxis);
+        if (!proj) return;
+        const rim = mapProjectedToCylinderRim(proj, cylinderAxis, cylinderRadius, cylinderHalfHeight);
+        if (!rim) return;
 
-      const atomMat = new THREE.MeshPhongMaterial({
-        color: 0xffa500, // Gold for all orbit atoms
-        emissive: 0x442200,
-        shininess: 80
+        const atomMat = new THREE.MeshPhongMaterial({
+          color: 0xffa500, // Gold for all orbit atoms
+          emissive: 0x442200,
+          shininess: 80
+        });
+
+        const atom = tag(new THREE.Mesh(
+          new THREE.SphereGeometry(atomRadius, 16, 12),
+          atomMat
+        ));
+        atom.position.copy(rim);
+        sg.add(atom);
       });
-
-      const atom = tag(new THREE.Mesh(
-        new THREE.SphereGeometry(atomRadius, 16, 12),
-        atomMat
-      ));
-      atom.position.copy(rim);
-      sg.add(atom);
-    });
+    }
 
     // Removed starting point marker - atoms on rims are sufficient
   }
@@ -818,17 +843,16 @@ export default function AppShell() {
       sg.remove(child);
     });
 
-    const operation = SYMMETRY_OPERATIONS[operationKey];
+    const operation = getEffectiveOperation(operationKey, selectedAxis);
     if (!operation) return;
 
     // Remove old atom meshes (keep cylinder and arrows)
     symmetryAtomMeshesRef.current.forEach(mesh => sg.remove(mesh));
     symmetryAtomMeshesRef.current = [];
 
-    // Determine cylinder axis
-    let cylinderAxis = 'c';
-    if (operationKey.includes('Oy')) cylinderAxis = 'b';
-    if (operationKey.includes('Ox')) cylinderAxis = 'a';
+    // Determine cylinder axis: whichever axis is currently selected
+    // (display-overridden for 2//Oy / 2̄//Oy — see getDisplayCylinderAxis)
+    const cylinderAxis = getDisplayCylinderAxis(operationKey, selectedAxis);
 
     const cylinderRadius = CS * 1.3;
     const cylinderHalfHeight = CS * 1.5;
@@ -848,13 +872,13 @@ export default function AppShell() {
       let isAbove;
       let phi;
       if (cylinderAxis === 'a') {
-        isAbove = x >= 0;
+        isAbove = isNonNegativeSide(x);
         phi = Math.atan2(z, y);
       } else if (cylinderAxis === 'b') {
-        isAbove = y >= 0;
+        isAbove = isNonNegativeSide(y);
         phi = Math.atan2(z, x);
       } else {
-        isAbove = z >= 0;
+        isAbove = isNonNegativeSide(z);
         phi = Math.atan2(y, x);
       }
 
@@ -893,6 +917,13 @@ export default function AppShell() {
       symmetryAtomMeshesRef.current.push(atom);
     };
 
+    // Helper to convert a 3D point to the corresponding rim position on the cylinder surface
+    const mapPointToCylinder = (point) => {
+      const proj = projectPointForAxis(point, cylinderAxis);
+      if (!proj) return new THREE.Vector3(0, 0, 0);
+      return mapProjectedToCylinderRim(proj, cylinderAxis, cylinderRadius, cylinderHalfHeight);
+    };
+
     const pointKey = (point) => {
       if (!point) return null;
       let x, y, z;
@@ -909,18 +940,46 @@ export default function AppShell() {
 
     // Determine active base and saved points (all points on top/bottom caps for operation structures)
     const activeBasePoint = (currentBasePoint && currentBasePoint.length === 3) ? currentBasePoint : basePoint;
-    const watchPoints = [activeBasePoint, ...savedAtoms.filter(atom => atom && (Array.isArray(atom) ? atom.length === 3 : true))];
+    const validSavedAtoms = savedAtoms.filter(atom => atom && (Array.isArray(atom) ? atom.length === 3 : true));
+    const watchPoints = [
+      { point: activeBasePoint, isSaved: false },
+      ...validSavedAtoms.map(atom => ({ point: atom, isSaved: true })),
+    ];
     const axis = cylinderAxis; // already derived from operationKey above
-    const visiblePoints = watchPoints.map(point => ({ point, proj: projectPointForAxis(point, axis) })).filter(item => item.proj);
+    const visiblePoints = watchPoints
+      .map(entry => ({ ...entry, proj: projectPointForAxis(entry.point, axis) }))
+      .filter(item => item.proj);
+
+    const pointsEqual = (a, b) => {
+      const [ax, ay, az] = Array.isArray(a) ? a : [a.x, a.y, a.z];
+      const [bx, by, bz] = Array.isArray(b) ? b : [b.x, b.y, b.z];
+      return Math.abs(ax - bx) < 1e-6 && Math.abs(ay - by) < 1e-6 && Math.abs(az - bz) < 1e-6;
+    };
+    // Once the live point has been saved, it sits exactly on top of that
+    // saved marker until the next Rotate/Inversion moves it away — skip the
+    // redundant gold sphere so only the green "saved" one is visible,
+    // giving a clear confirmation that Save Position was applied.
+    const activeMatchesSaved = validSavedAtoms.some(saved => pointsEqual(saved, activeBasePoint));
+    // While Rotate/Inversion is animating, currentBasePoint (and therefore
+    // activeBasePoint) is deliberately still the OLD position — only
+    // previewAtom moves. Once it has visibly diverged from that old
+    // position, stop drawing the "resting" gold sphere there too, so only
+    // the single animating ball (drawn further below) is shown instead of
+    // two — the old one frozen in place plus the one sweeping past it.
+    // Inversion suppresses it for the whole animation (progress 0 included)
+    // since the animated ball is drawn at that exact same spot at t=0 too.
+    const isAnimatingAway = previewAtom && (previewAtom.isInversion || pointKey(previewAtom) !== pointKey(activeBasePoint));
 
     visiblePoints.forEach((entry) => {
-      const point = entry.point;
-      const projection = entry.proj;
-      const isOriginal = pointKey(point) === pointKey(activeBasePoint);
+      const { point, isSaved, proj: projection } = entry;
+      if (!isSaved && (activeMatchesSaved || isAnimatingAway)) return;
       const pos = mapProjectedToCylinderRim(projection, axis, cylinderRadius, cylinderHalfHeight);
       if (!pos) return;
-      const matColor = 0xffa500; // Gold for all symmetry atoms
-      const matEmissive = 0x442200;
+      // Saved positions turn green (matching the Save Position button) so
+      // the user can see the click landed; the live point that
+      // Rotate/Inversion will actually move stays gold.
+      const matColor = isSaved ? 0x28a745 : 0xffa500;
+      const matEmissive = isSaved ? 0x0a3315 : 0x442200;
       const atomMat = new THREE.MeshPhongMaterial({ color: matColor, emissive: matEmissive, shininess: 80 });
       const atom = tag(new THREE.Mesh(new THREE.SphereGeometry(atomRadius, 16, 12), atomMat));
       atom.position.copy(pos);
@@ -929,33 +988,42 @@ export default function AppShell() {
     });
 
     // Add current preview atom (green while animating only; final position is drawn as base atom)
-    const animatedPoint = previewAtom && pointKey(previewAtom) !== pointKey(activeBasePoint) ? previewAtom : null;
-    if (animatedPoint) {
-      const isAlreadySaved = savedAtoms.some(saved => {
-        const [ax, ay, az] = Array.isArray(animatedPoint) ? animatedPoint : [animatedPoint.x, animatedPoint.y, animatedPoint.z];
-        return Math.abs(saved.x - ax) < 1e-6 && Math.abs(saved.y - ay) < 1e-6 && Math.abs(saved.z - az) < 1e-6;
-      });
-      if (!isAlreadySaved) {
-        const proj = projectPointForAxis(animatedPoint, axis);
-        if (proj) {
-          const rim = mapProjectedToCylinderRim(proj, axis, cylinderRadius, cylinderHalfHeight);
-          if (rim) {
-            const currentMat = new THREE.MeshPhongMaterial({ color: 0xffa500, emissive: 0x442200, shininess: 80 });
-            const currentMesh = tag(new THREE.Mesh(new THREE.SphereGeometry(atomRadius, 16, 12), currentMat));
-            currentMesh.position.copy(rim);
-            sg.add(currentMesh);
-            symmetryAtomMeshesRef.current.push(currentMesh);
+    if (previewAtom && previewAtom.isInversion) {
+      // Map only the well-defined start point once, then slide in a
+      // straight line to its exact reflection through the origin — see the
+      // note in applyInversion for why re-projecting intermediate raw
+      // coordinates (which pass near the origin, where direction/angle is
+      // undefined) isn't used here.
+      const startRim = mapPointToCylinder(previewAtom.from);
+      const endRim = startRim.clone().negate();
+      const pos = startRim.clone().lerp(endRim, previewAtom.progress ?? 1);
+      const currentMat = new THREE.MeshPhongMaterial({ color: 0xffa500, emissive: 0x442200, shininess: 80 });
+      const currentMesh = tag(new THREE.Mesh(new THREE.SphereGeometry(atomRadius, 16, 12), currentMat));
+      currentMesh.position.copy(pos);
+      sg.add(currentMesh);
+      symmetryAtomMeshesRef.current.push(currentMesh);
+    } else {
+      const animatedPoint = isAnimatingAway ? previewAtom : null;
+      if (animatedPoint) {
+        const isAlreadySaved = savedAtoms.some(saved => {
+          const [ax, ay, az] = Array.isArray(animatedPoint) ? animatedPoint : [animatedPoint.x, animatedPoint.y, animatedPoint.z];
+          return Math.abs(saved.x - ax) < 1e-6 && Math.abs(saved.y - ay) < 1e-6 && Math.abs(saved.z - az) < 1e-6;
+        });
+        if (!isAlreadySaved) {
+          const proj = projectPointForAxis(animatedPoint, axis);
+          if (proj) {
+            const rim = mapProjectedToCylinderRim(proj, axis, cylinderRadius, cylinderHalfHeight);
+            if (rim) {
+              const currentMat = new THREE.MeshPhongMaterial({ color: 0xffa500, emissive: 0x442200, shininess: 80 });
+              const currentMesh = tag(new THREE.Mesh(new THREE.SphereGeometry(atomRadius, 16, 12), currentMat));
+              currentMesh.position.copy(rim);
+              sg.add(currentMesh);
+              symmetryAtomMeshesRef.current.push(currentMesh);
+            }
           }
         }
       }
     }
-
-    // Helper to convert a 3D point to the corresponding rim position on the cylinder surface
-    const mapPointToCylinder = (point) => {
-      const proj = projectPointForAxis(point, cylinderAxis);
-      if (!proj) return new THREE.Vector3(0, 0, 0);
-      return mapProjectedToCylinderRim(proj, cylinderAxis, cylinderRadius, cylinderHalfHeight);
-    };
 
     // Draw all motion indicators (rotation/inversion path visualization)
     const drawMotionIndicators = true;
@@ -986,11 +1054,11 @@ export default function AppShell() {
           // Determine rim height from the 'from' point
           let rimHeight;
           if (opCylinderAxis === 'a') {
-            rimHeight = fx >= 0 ? cylinderHalfHeight : -cylinderHalfHeight;
+            rimHeight = isNonNegativeSide(fx) ? cylinderHalfHeight : -cylinderHalfHeight;
           } else if (opCylinderAxis === 'b') {
-            rimHeight = fy >= 0 ? cylinderHalfHeight : -cylinderHalfHeight;
+            rimHeight = isNonNegativeSide(fy) ? cylinderHalfHeight : -cylinderHalfHeight;
           } else {
-            rimHeight = fz >= 0 ? cylinderHalfHeight : -cylinderHalfHeight;
+            rimHeight = isNonNegativeSide(fz) ? cylinderHalfHeight : -cylinderHalfHeight;
           }
 
           // Create curved path points
@@ -1034,10 +1102,16 @@ export default function AppShell() {
       } else if (indicator.type === 'inversion') {
         try {
           // Dashed lines through origin for inversion
-          // Map both endpoints to the cylinder surface coordinates for consistent visualization
+          // Map the start point to the cylinder surface, then place the end
+          // point at its exact geometric negation (rather than independently
+          // re-projecting indicator.to) so the origin is always precisely the
+          // midpoint of the two — guaranteed even when a coordinate is
+          // exactly 0, where independently re-deriving "above/below" for the
+          // inverted point could tie-break to the same side as the original
+          // (since -0 >= 0 is true in JS) and produce a bent, off-center line.
           const startPoint = mapPointToCylinder(indicator.from);
           const originPoint = new THREE.Vector3(0, 0, 0);
-          const endPoint = mapPointToCylinder(indicator.to);
+          const endPoint = startPoint.clone().negate();
 
           // Draw line from base to origin
           const totalLength1 = startPoint.distanceTo(originPoint);
@@ -1104,8 +1178,7 @@ export default function AppShell() {
     setDefaultOrbit(1.05, 0.55, cSize===1 ? 14 : cSize===2 ? 26 : 38);
     applyOrbit();
 
-    const isCubicMetal = ['sc','bcc','fcc'].includes(key);
-    const effectiveMode = (sMode === 'cpk' && !isCubicMetal) ? 'bs' : sMode;
+    const effectiveMode = sMode;
     const atomList = s.atoms;
     const sfRadii = effectiveMode === 'cpk' ? computeSFRadii(atomList, s, key) : null;
 
@@ -1140,7 +1213,7 @@ export default function AppShell() {
         return mesh;
       });
 
-      if (bMode && effectiveMode === 'bs') drawBonds(s, meshes, atomList, sg);
+      if (bMode && effectiveMode === 'bs' && CUBIC_STRUCT_KEYS.includes(key)) drawBonds(s, meshes, atomList, sg);
     })));
 
     // Axis arrows
@@ -1191,7 +1264,8 @@ export default function AppShell() {
     const sg = symmetryGuideGroupRef.current;
     if (!sg || !orbit || orbit.length === 0) return;
     const ORBIT_RADIUS = 0.12 * CS;
-    const axis = selectedOperation.includes('Oy') ? 'b' : selectedOperation.includes('Ox') ? 'a' : 'c';
+    // display-overridden for 2//Oy / 2̄//Oy — see getDisplayCylinderAxis
+    const axis = getDisplayCylinderAxis(selectedOperation, selectedAxis);
     const noMidOrbit = filterTopBottomOrbit(orbit, axis);
     orbit = noMidOrbit;
     // Cylinder-aligned orbit coordinates derived from stereographic projection
@@ -1292,23 +1366,37 @@ export default function AppShell() {
     sg.add(cyl);
   }
 
+  // Each rule below bonds only the real nearest-neighbor pairs for that
+  // structure (verified against standard crystallography references — see
+  // each structure's own `param`/cn fields for the same distance formulas):
+  //  - ionic structures bond cation↔anion only, never same-charge pairs
+  //  - sc/bcc/fcc/hcp use the exact known nearest-neighbor distance so the
+  //    longer same-species diagonal (e.g. bcc/fcc corner-to-corner) is
+  //    correctly excluded
+  //  - diamond bonds each interior tetrahedral atom to its nearest 4
   function drawBonds(s, meshes, atoms, sg) {
-    // Bonds disabled - only atoms will be shown
-    return;
-  }
-
-  function drawBonds_disabled(s, meshes, atoms, sg) {
     const rule = s.bondRule;
     if (rule === 'ionic') {
-      const threshold = getShortestEdge(s) * 0.85;
+      // Bond only cation↔anion pairs (never same-charge), at the true
+      // shortest cation-anion distance found in the cell — computed
+      // dynamically rather than guessed as a fraction of the cell edge,
+      // since that fraction varies by structure (a/2 for NaCl, a√3/4 for
+      // ZnS/CaF₂, a√3/2 for CsCl) and a single fixed multiplier can't fit all of them.
+      let minDist = Infinity;
+      const candidates = [];
       for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
         const lbI=atoms[i].lb||'', lbJ=atoms[j].lb||'';
         const isCat=lbI.includes('⁺'), isAn=lbI.includes('⁻')||lbI.includes('²⁻');
         const jCat=lbJ.includes('⁺'), jAn=lbJ.includes('⁻')||lbJ.includes('²⁻');
         if (!((isCat&&jAn)||(isAn&&jCat))) continue;
-        if (meshes[i].position.distanceTo(meshes[j].position) < threshold)
-          makeBondCyl(meshes[i].position, meshes[j].position, sg);
+        const d = meshes[i].position.distanceTo(meshes[j].position);
+        if (d>0.01) { candidates.push({i,j,d}); if (d<minDist) minDist=d; }
       }
+      if (!isFinite(minDist)) return;
+      const tol = minDist*0.06;
+      candidates.forEach(({i,j,d}) => {
+        if (Math.abs(d-minDist)<tol) makeBondCyl(meshes[i].position, meshes[j].position, sg);
+      });
       return;
     }
     if (rule === 'diamond') {
@@ -1320,31 +1408,11 @@ export default function AppShell() {
       });
       return;
     }
-    if (rule === 'metal') {
-      // Metal bonding: bond all atoms based on nearest-neighbor distance
-      const isHCP = atoms.length >= 10;
-      const nnTol = isHCP ? 1.62 : 1.16;
-      let minDist = Infinity;
-      for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
-        const d=meshes[i].position.distanceTo(meshes[j].position);
-        if (d>0.01&&d<minDist) minDist=d;
-      }
-      if (!isFinite(minDist)) return;
-      const tol2 = minDist*nnTol;
-      for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
-        const d=meshes[i].position.distanceTo(meshes[j].position);
-        if (d>0.01&&d<=tol2) makeBondCyl(meshes[i].position, meshes[j].position, sg);
-      }
-      return;
-    }
     if (rule === 'sc') {
       // Simple Cubic: bond edge-connected corners only (distance = CS, no diagonals)
-      const edgeLen = CS * 1.01; // Allow small tolerance
       for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
         const d = meshes[i].position.distanceTo(meshes[j].position);
-        if (Math.abs(d - CS) < 0.1) { // Only bond at edge length
-          makeBondCyl(meshes[i].position, meshes[j].position, sg);
-        }
+        if (Math.abs(d - CS) < 0.1) makeBondCyl(meshes[i].position, meshes[j].position, sg);
       }
       return;
     }
@@ -1364,32 +1432,65 @@ export default function AppShell() {
       }
       return;
     }
-    const isHCP = atoms.length >= 10;
-    const nnTol = isHCP ? 1.62 : 1.16;
+    if (rule === 'hcp') {
+      // Ideal hcp: all 12 nearest neighbors of any atom sit at exactly the
+      // in-plane lattice constant |a1| (unlike bcc/fcc there's no separate
+      // shorter diagonal to disambiguate).
+      const aLen = Math.sqrt(s.lv[0][0]**2 + s.lv[0][1]**2 + s.lv[0][2]**2);
+      const tol = aLen * 0.06;
+      for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
+        if (Math.abs(meshes[i].position.distanceTo(meshes[j].position)-aLen)<tol)
+          makeBondCyl(meshes[i].position, meshes[j].position, sg);
+      }
+      return;
+    }
+    // Generic single-species metal placeholder (Bravais lattices without a
+    // specific named structure): bond every pair within a small tolerance of
+    // the shortest pairwise distance actually present in this cell.
     let minDist = Infinity;
     for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
       const d=meshes[i].position.distanceTo(meshes[j].position);
       if (d>0.01&&d<minDist) minDist=d;
     }
     if (!isFinite(minDist)) return;
-    const tol2 = minDist*nnTol;
+    const tol2 = minDist*1.16;
+    const bondCount = new Array(meshes.length).fill(0);
+    let nearest = meshes.map(() => ({ j: -1, d: Infinity }));
     for (let i=0; i<meshes.length; i++) for (let j=i+1; j<meshes.length; j++) {
       const d=meshes[i].position.distanceTo(meshes[j].position);
-      if (d>0.01&&d<=tol2) makeBondCyl(meshes[i].position, meshes[j].position, sg);
+      if (d<=0.01) continue;
+      if (d<=tol2) { makeBondCyl(meshes[i].position, meshes[j].position, sg); bondCount[i]++; bondCount[j]++; }
+      if (d<nearest[i].d) nearest[i] = { j, d };
+      if (d<nearest[j].d) nearest[j] = { j: i, d };
+    }
+    // A handful of these placeholder lattices (e.g. a body-centered cell whose
+    // axes are stretched enough that the centering atom's true nearest
+    // neighbor is a periodic image outside this single drawn cell) can leave
+    // an atom with no bond at all within the tolerance above. Rather than
+    // show a visually "orphaned" atom, connect it to its single closest
+    // neighbor in the cell regardless of tolerance.
+    for (let i=0; i<meshes.length; i++) {
+      if (bondCount[i] === 0 && nearest[i].j !== -1) {
+        makeBondCyl(meshes[i].position, meshes[nearest[i].j].position, sg);
+      }
     }
   }
 
   // ── Struct info card ───────────────────────────────────────────────────────
   function buildStructInfo(key) {
     const s = STRUCTS[key];
+    const isFr = lang === 'fr';
+    const paramText = isFr && PARAM_TRANSLATIONS_FR[s.param] ? PARAM_TRANSLATIONS_FR[s.param] : s.param;
+    const rRatioText = isFr && RRATIO_TRANSLATIONS_FR[key] ? RRATIO_TRANSLATIONS_FR[key] : s.rRatio;
+    const examplesText = isFr && EXAMPLES_TRANSLATIONS_FR[key] ? EXAMPLES_TRANSLATIONS_FR[key] : s.examples;
     const rows = [
       [t('rowZ'),       String(s.z)],
       [t('rowCN'),      s.cn],
       [t('rowAPF'),     s.apf],
-      [t('rowParam'),   s.param],
-      s.rRatio ? [t('rowRatio'), s.rRatio] : null,
+      [t('rowParam'),   paramText],
+      s.rRatio ? [t('rowRatio'), rRatioText] : null,
       [t('rowSystem'),  t(s.system) !== s.system ? t(s.system) : s.system],
-      [t('rowExamples'),s.examples],
+      [t('rowExamples'),examplesText],
     ].filter(Boolean);
 
     const seen = new Map();
@@ -1417,7 +1518,7 @@ export default function AppShell() {
       cam.updateProjectionMatrix();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabSwitchKey, structKey, cellSize, showBonds, renderMode, lang]);
+  }, [currentTab, tabSwitchKey, structKey, cellSize, showBonds, renderMode, lang]);
 
   // ── Miller scene ───────────────────────────────────────────────────────────
   function buildMillerScene(N, origin) {
@@ -1473,9 +1574,14 @@ export default function AppShell() {
     const sg = sceneGroupRef.current;
     if (u===0&&v===0&&w===0) return;
     const unit=CS;
-    const ox=origin[0],oy=origin[1],oz=origin[2];
-    const start=new THREE.Vector3(-ox*unit,-oy*unit,-oz*unit);
-    const end=new THREE.Vector3((u-ox)*unit,(v-oy)*unit,(w-oz)*unit);
+    // The selected origin corner is always rendered at world (0,0,0) — see
+    // nodePos() in buildMillerScene, which shifts the whole grid so that node
+    // `origin` lands at the world origin. The direction arrow must start there
+    // too, not at nodePos(0,0,0) (which is the *absolute* (0,0,0) lattice
+    // corner and drifts away from the highlighted origin marker whenever a
+    // non-default origin corner is selected).
+    const start=new THREE.Vector3(0,0,0);
+    const end=new THREE.Vector3(u*unit,v*unit,w*unit);
     const dir=end.clone().sub(start).normalize();
     const len=end.clone().sub(start).length();
     sg.add(tag(new THREE.ArrowHelper(dir,start,len,0xffdd00,0.35,0.14)));
@@ -1568,7 +1674,7 @@ export default function AppShell() {
       cam.updateProjectionMatrix();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabSwitchKey, millerSub, cellSize, millerOrigin, millerU, millerV, millerW, millerH, millerK, millerL]);
+  }, [currentTab, tabSwitchKey, millerSub, cellSize, millerOrigin, millerU, millerV, millerW, millerH, millerK, millerL]);
 
   useEffect(() => {
     if (currentTab !== 'symmetry') return;
@@ -1578,33 +1684,41 @@ export default function AppShell() {
     if (sceneGroupRef.current) sceneGroupRef.current.visible = false;
     if (symmetryGuideGroupRef.current) symmetryGuideGroupRef.current.visible = true;
     // Symmetry guide group (cylinder + markers)
-    buildSymmetryGuide(symmetryGuideGroupRef.current, selectedOperation, symmetryPoint, structKey);
-    // Show atoms for the currently selected operation
-    const operation = SYMMETRY_OPERATIONS[selectedOperation];
-    const base = currentBasePoint || symmetryPoint;
-    if (operation) {
-      const orbitPoints = generateOrbitPoints(base, operation);
-      drawSymmetryOrbit(orbitPoints);
+    buildSymmetryGuide(symmetryGuideGroupRef.current, selectedOperation, symmetryPoint, structKey, selectedAxis);
+    // Show atoms for the currently selected operation. Only in Direct mode:
+    // Step-by-Step has its own dedicated renderer (updateSymmetryScene,
+    // below) that tracks the live point and saved positions individually,
+    // and drawing this too would add a redundant same-position gold sphere
+    // that z-fights with the saved (green) marker.
+    if (!stepMode) {
+      const operation = getEffectiveOperation(selectedOperation, selectedAxis);
+      const base = currentBasePoint || symmetryPoint;
+      if (operation) {
+        const orbitPoints = generateOrbitPoints(base, operation, selectedOperation);
+        drawSymmetryOrbit(orbitPoints);
+      }
     }
-    const structDef = STRUCTS[structKey];
-    if (structDef) {
-      // align view axis according to selected symmetry operation axis
-      const axisKey = selectedOperation.includes('Oy') ? 'b' : selectedOperation.includes('Ox') ? 'a' : 'c';
-      alignGroupToY(getAxisVector(structDef, axisKey), symmetryGuideGroupRef.current);
-    } else {
-      console.warn('Symmetry tab: STRUCTS[structKey] missing', structKey);
-    }
+    // Always show a fixed orthogonal frame — x down, y right, z up on
+    // screen — the same x/y/z convention already used in the 2D
+    // Stereographic Projection legend, independent of the selected
+    // operation's axis or the real structure's true lattice shape.
+    alignGroupToY(new THREE.Vector3(0, 0, 1), symmetryGuideGroupRef.current);
+    symmetryGuideGroupRef.current.rotateZ(-52 * Math.PI / 180);
     applyOrbit();
-    centerOrbitOnScene(symmetryGuideGroupRef.current);
-    updateSymmetryScene(selectedOperation, base);
+    // Place the orbit/atom markers BEFORE centering: centering on the guide
+    // (axes + caps only, before atoms are added) leaves the camera aimed at a
+    // point that doesn't match the final scene once atoms are placed, which is
+    // most visible after editing the Starting Point (that state change doesn't
+    // trigger any other effect that re-centers afterward).
     updateSymmetryScene(selectedOperation, currentBasePoint);
+    centerOrbitOnScene(symmetryGuideGroupRef.current);
     // Force camera projection update
     const cam = cameraRef.current;
     if (cam) {
       cam.updateProjectionMatrix();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTab, tabSwitchKey, structKey, selectedOperation, symmetryPoint]);
+  }, [currentTab, tabSwitchKey, structKey, selectedOperation, selectedAxis, symmetryPoint, stepMode]);
 
   // ── Update 3D scene with saved/preview atoms for Application Mode ─────────
   useEffect(() => {
@@ -1635,12 +1749,13 @@ export default function AppShell() {
     
     // Clear symmetry state when leaving symmetry tab
     if (currentTab === 'symmetry' && tab !== 'symmetry') {
+      symmetryAnimTokenRef.current++; // cancel any in-flight rotation/inversion animation
       setSavedAtoms([]);
       setPreviewAtom(null);
       setOperationsLog([]);
       setSelectedOperation('1');
-      setSymmetryPoint([0.25, 0.25, 0.25]);
-      setCurrentBasePoint([0.25, 0.25, 0.25]);
+      setSymmetryPoint([...DEFAULT_SYMMETRY_POINT]);
+      setCurrentBasePoint([...DEFAULT_SYMMETRY_POINT]);
     }
     
     // Reset controls to defaults when switching tabs - BEFORE changing tab
@@ -1672,8 +1787,8 @@ export default function AppShell() {
       if (sceneGroupRef.current) sceneGroupRef.current.visible = false;
       if (symmetryGuideGroupRef.current) symmetryGuideGroupRef.current.visible = false;
     } else if (tab === 'symmetry') {
-      setSymmetryPoint([0.25, 0.25, 0.25]);
-      setCurrentBasePoint([0.25, 0.25, 0.25]);
+      setSymmetryPoint([...DEFAULT_SYMMETRY_POINT]);
+      setCurrentBasePoint([...DEFAULT_SYMMETRY_POINT]);
       setSavedAtoms([]);
       setPreviewAtom(null);
       setSelectedOperation('1');
@@ -1692,8 +1807,9 @@ export default function AppShell() {
   }
 
   function handleSymmetryReset() {
-    setSymmetryPoint([0.25, 0.25, 0.25]);
-    setCurrentBasePoint([0.25, 0.25, 0.25]);
+    symmetryAnimTokenRef.current++; // cancel any in-flight rotation/inversion animation
+    setSymmetryPoint([...DEFAULT_SYMMETRY_POINT]);
+    setCurrentBasePoint([...DEFAULT_SYMMETRY_POINT]);
     setSavedAtoms([]);
     setPreviewAtom(null);
     setSelectedOperation('1');
@@ -1720,23 +1836,84 @@ export default function AppShell() {
       setCurrentBasePoint(newBasePoint);
       setPreviewAtom(null);
       setShowConfirmBar(false);
+      // Once every saved checkpoint has been undone, also clear the arc
+      // trail so returning to the true starting point shows a clean single
+      // ball rather than leftover motion arcs from steps that no longer
+      // have a saved position to anchor to.
+      if (newSavedAtoms.length === 0) setMotionIndicators([]);
     }
   }
 
   function handleOperationSelect(operation) {
-    if (operation === selectedOperation) return; // No change needed
+    // The `stepFreshEntry`/`stepMode` exceptions let an explicit click on
+    // the already-selected operation still count as a real pick — either to
+    // clear the suppressed "1" highlight, or (while in Step-by-Step) to
+    // drop back to the default view even though the operation itself
+    // didn't change.
+    if (operation === selectedOperation && !stepFreshEntry && !stepMode) return;
 
     // Reset all application mode state when operation changes
+    symmetryAnimTokenRef.current++; // cancel any in-flight rotation/inversion animation
     setSelectedOperation(operation);
+    setSelectedAxis(SYMMETRY_OPERATIONS[operation]?.axis || 'c');
+    setAxisAutoSynced(true); // axis changed as a side effect — don't highlight it in the axis picker
     setCurrentBasePoint(symmetryPoint);
     setSavedAtoms([]);
     setPreviewAtom(null);
     setOperationsLog([]);
     setCurrentStep(1);
     setShowConfirmBar(false);
+    setMotionIndicators([]); // clear any leftover rotation/inversion arc from a previous operation
+    setStepFreshEntry(false);
+    setStepMode(false); // picking a Select Operation button always drops back to the default (non step-by-step) view
 
     // Update the 3D scene with the new operation
     updateSymmetryScene(operation, symmetryPoint);
+  }
+
+  // Dedicated handler for the Step-by-Step toggle button. This deliberately
+  // does NOT go through handleOperationSelect: that function's "no-op if
+  // operation unchanged" guard reads `stepMode`/`stepFreshEntry` from this
+  // render's closure, which is still the pre-toggle value at the moment
+  // it'd be called from here (setStepMode's effect isn't visible yet in the
+  // same synchronous handler) — so routing through it silently skipped the
+  // scene reset whenever selectedOperation was already '1'. A standalone,
+  // unconditional reset avoids that class of bug entirely.
+  function handleStepModeToggle() {
+    const next = !stepMode;
+    symmetryAnimTokenRef.current++; // cancel any in-flight rotation/inversion animation
+    setStepMode(next);
+    setSelectedOperation('1');
+    setSelectedAxis('c');
+    setAxisAutoSynced(true);
+    setCurrentBasePoint(symmetryPoint);
+    setSavedAtoms([]);
+    setPreviewAtom(null);
+    setOperationsLog([]);
+    setCurrentStep(1);
+    setShowConfirmBar(false);
+    setMotionIndicators([]);
+    setStepFreshEntry(next); // suppress the "1" highlight only when entering, not when leaving
+    updateSymmetryScene('1', symmetryPoint);
+  }
+
+  function handleAxisSelect(axis) {
+    // Deliberately does NOT touch stepFreshEntry: the Rotation Axis picker
+    // lives in the Step-by-Step subsection, not Select Operation, so using
+    // it must never make a Select Operation button look clicked.
+    // The `axisAutoSynced` exception mirrors stepFreshEntry: an explicit
+    // click on the already-synced axis still counts as a real pick.
+    if (axis === selectedAxis && !axisAutoSynced) return;
+    symmetryAnimTokenRef.current++; // cancel any in-flight rotation/inversion animation
+    setSelectedAxis(axis);
+    setAxisAutoSynced(false); // now explicitly chosen by the user — safe to highlight
+    setCurrentBasePoint(symmetryPoint);
+    setSavedAtoms([]);
+    setPreviewAtom(null);
+    setOperationsLog([]);
+    setCurrentStep(1);
+    setShowConfirmBar(false);
+    setMotionIndicators([]); // clear any leftover rotation/inversion arc from the previous axis
   }
 
   function applyRotation(angleDeg) {
@@ -1766,15 +1943,8 @@ export default function AppShell() {
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
 
-      // Determine rotation axis based on selected operation
-      let axis = 'z'; // default
-      if (selectedOperation.includes('Oy') || selectedOperation.includes('2̄//Oy')) {
-        axis = 'y';
-      } else if (selectedOperation.includes('Ox')) {
-        axis = 'x';
-      } else {
-        axis = 'z'; // Default for most operations
-      }
+      // Rotation axis comes directly from the axis picker (single source of truth)
+      const axis = selectedAxis === 'b' ? 'y' : selectedAxis === 'a' ? 'x' : 'z';
 
       let newX, newY, newZ;
       if (axis === 'x') {
@@ -1817,6 +1987,11 @@ export default function AppShell() {
       const duration = getAnimationDuration(animationSpeed);
       const startTime = Date.now();
 
+      // Invalidate any previously in-flight rotation/inversion animation so
+      // rapid-fire clicks can't race each other or leak into a tab switch /
+      // reset that already moved state elsewhere.
+      const myAnimToken = ++symmetryAnimTokenRef.current;
+
       // Add motion indicator immediately so the curved arc is visible during animation
       const motionIndicator = {
         type: 'rotation',
@@ -1833,27 +2008,49 @@ export default function AppShell() {
 
       // Animation function
       const animate = () => {
+        if (symmetryAnimTokenRef.current !== myAnimToken) return; // superseded/cancelled
+
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
-        // Interpolate position
-        const currentX = previousPoint[0] + (newPoint[0] - previousPoint[0]) * progress;
-        const currentY = previousPoint[1] + (newPoint[1] - previousPoint[1]) * progress;
-        const currentZ = previousPoint[2] + (newPoint[2] - previousPoint[2]) * progress;
+        // Sweep the actual angle rather than lerping x/y/z in a straight
+        // line: a straight-line chord between start and end cuts through
+        // the rotation axis itself at 180° (collapsing to the center
+        // mid-animation) and is subtly off-arc at every other angle too.
+        const t = angle * progress;
+        const tc = Math.cos(t), ts = Math.sin(t);
+        let currentX, currentY, currentZ;
+        if (axis === 'x') {
+          currentX = x;
+          currentY = y * tc - z * ts;
+          currentZ = y * ts + z * tc;
+        } else if (axis === 'y') {
+          currentX = x * tc + z * ts;
+          currentY = y;
+          currentZ = -x * ts + z * tc;
+        } else {
+          currentX = x * tc - y * ts;
+          currentY = x * ts + y * tc;
+          currentZ = z;
+        }
         setPreviewAtom({ x: currentX, y: currentY, z: currentZ, isPreview: true });
 
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
+          // Deliberately does NOT touch symmetryPoint: that must stay the
+          // fixed starting point for this operation (savedAtoms tracks the
+          // checkpoint history) so "Back" can correctly fall back to it
+          // once every saved position has been popped, instead of landing
+          // back on wherever the last rotation happened to end.
           setCurrentBasePoint(newPoint);
-          setSymmetryPoint(newPoint);
           setPreviewAtom(null);
           // Animation complete - add to operations log
           setOperationsLog(prev => [...prev, {
             step: savedAtoms.length + motionIndicators.length + 1,
             from: `(${previousPoint[0].toFixed(2)}, ${previousPoint[1].toFixed(2)}, ${previousPoint[2].toFixed(2)})`,
             to: `(${newPoint[0].toFixed(2)}, ${newPoint[1].toFixed(2)}, ${newPoint[2].toFixed(2)})`,
-            isAbovePlane: (axis === 'x' ? newX : axis === 'y' ? newY : newZ) >= 0
+            isAbovePlane: isNonNegativeSide(axis === 'x' ? newX : axis === 'y' ? newY : newZ)
           }]);
         }
       };
@@ -1899,6 +2096,11 @@ export default function AppShell() {
       const duration = getAnimationDuration(animationSpeed);
       const startTime = Date.now();
 
+      // Invalidate any previously in-flight rotation/inversion animation so
+      // rapid-fire clicks can't race each other or leak into a tab switch /
+      // reset that already moved state elsewhere.
+      const myAnimToken = ++symmetryAnimTokenRef.current;
+
       // Add motion indicator immediately so the dashed line is visible during animation
       const motionIndicator = {
         type: 'inversion',
@@ -1908,27 +2110,33 @@ export default function AppShell() {
       };
       setMotionIndicators(prev => [...prev, motionIndicator]);
 
-      // Keep currentBasePoint fixed during animation; previewAtom animates
-      setPreviewAtom({ x: previousPoint[0], y: previousPoint[1], z: previousPoint[2], isPreview: true });
+      // Keep currentBasePoint fixed during animation; previewAtom animates.
+      // Unlike rotation, inversion is NOT rendered by re-projecting the
+      // interpolated raw (x,y,z) each frame: near the origin that vector's
+      // angle/side becomes numerically unstable (a near-zero vector has no
+      // well-defined direction), which made the animated ball wander off
+      // the straight inversion line instead of sliding smoothly through the
+      // center. Instead the renderers map only the well-defined start point
+      // once and interpolate the RENDER-SPACE position between it and its
+      // exact reflection — see `isInversion`/`progress`/`from` below.
+      setPreviewAtom({ x: previousPoint[0], y: previousPoint[1], z: previousPoint[2], isPreview: true, isInversion: true, progress: 0, from: previousPoint });
 
       // Animation function
       const animate = () => {
+        if (symmetryAnimTokenRef.current !== myAnimToken) return; // superseded/cancelled
+
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
-        // Interpolate position
-        const currentX = previousPoint[0] + (newPoint[0] - previousPoint[0]) * progress;
-        const currentY = previousPoint[1] + (newPoint[1] - previousPoint[1]) * progress;
-        const currentZ = previousPoint[2] + (newPoint[2] - previousPoint[2]) * progress;
-
-        setPreviewAtom({ x: currentX, y: currentY, z: currentZ, isPreview: true });
+        setPreviewAtom({ x: previousPoint[0], y: previousPoint[1], z: previousPoint[2], isPreview: true, isInversion: true, progress, from: previousPoint });
 
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
-          // Ensure end position is exact in case of floating point rounding
+          // Ensure end position is exact in case of floating point rounding.
+          // Deliberately does NOT touch symmetryPoint — see the matching
+          // note in applyRotation's completion branch.
           setCurrentBasePoint(newPoint);
-          setSymmetryPoint(newPoint);
           setPreviewAtom(null);
 
           // Animation complete - add to operations log
@@ -1937,7 +2145,7 @@ export default function AppShell() {
             operation: 'Inversion',
             from: `(${previousPoint[0].toFixed(2)}, ${previousPoint[1].toFixed(2)}, ${previousPoint[2].toFixed(2)})`,
             to: `(${newPoint[0].toFixed(2)}, ${newPoint[1].toFixed(2)}, ${newPoint[2].toFixed(2)})`,
-            isAbovePlane: (selectedOperation.includes('Oy') || selectedOperation.includes('2̄//Oy') ? newPoint[1] : selectedOperation.includes('Ox') ? newPoint[0] : newPoint[2]) >= 0
+            isAbovePlane: isNonNegativeSide(selectedAxis === 'b' ? newPoint[1] : selectedAxis === 'a' ? newPoint[0] : newPoint[2])
           }]);
         }
       };
@@ -1966,7 +2174,7 @@ export default function AppShell() {
       x: currentPos[0],
       y: currentPos[1],
       z: currentPos[2],
-      isAbovePlane: (selectedOperation.includes('Oy') || selectedOperation.includes('2̄//Oy') ? currentPos[1] >= 0 : selectedOperation.includes('Ox') ? currentPos[0] >= 0 : currentPos[2] >= 0),
+      isAbovePlane: isNonNegativeSide(selectedAxis === 'b' ? currentPos[1] : selectedAxis === 'a' ? currentPos[0] : currentPos[2]),
       stepIndex: savedAtoms.length + 1
     };
     setSavedAtoms(prev => [...prev, newAtom]);
@@ -1982,7 +2190,7 @@ export default function AppShell() {
   }
 
   function applySymmetryOperation(operationKey, step = null) {
-    const operation = SYMMETRY_OPERATIONS[operationKey];
+    const operation = getEffectiveOperation(operationKey, selectedAxis);
     if (!operation) return;
     const opPoint = (currentBasePoint && Array.isArray(currentBasePoint) && currentBasePoint.length === 3)
       ? currentBasePoint
@@ -1991,8 +2199,8 @@ export default function AppShell() {
     let description = operation.name;
 
     // Get all orbit points
-    const allOrbitPoints = generateOrbitPoints(opPoint, operation);
-    const axis = operationKey.includes('Oy') ? 'b' : operationKey.includes('Ox') ? 'a' : 'c';
+    const allOrbitPoints = generateOrbitPoints(opPoint, operation, operationKey);
+    const axis = selectedAxis || 'c';
     const topBottomOrbit = filterTopBottomOrbit(allOrbitPoints, axis);
 
     if (stepMode && step) {
@@ -2023,7 +2231,7 @@ export default function AppShell() {
     setOperationsLog(prev => [...prev, newEntry]);
   }
 
-  function generateOrbitPoints(startPoint, operation) {
+  function generateOrbitPoints(startPoint, operation, operationKey) {
     const points = [startPoint];
 
     if (operation.order === 1) {
@@ -2035,6 +2243,16 @@ export default function AppShell() {
       currentPoint = operation.transform(...currentPoint);
       points.push(currentPoint);
     }
+
+    // 2̄//Oz (mirror ⊥ Oz) is explicitly exempted from dedup: for a
+    // starting point with z=0, its mirror image (same x,y, negated z)
+    // numerically coincides with the original (±0 differ only in sign),
+    // so the generic filter below would otherwise hide it entirely. The
+    // user wants both positions always shown for this operation — the
+    // second one lands on the opposite cap via the app's own
+    // isNonNegativeSide(-0)=false rule, making the mirror visible even in
+    // this edge case.
+    if (operationKey === '2̄//Oz') return points;
 
     // Remove duplicates
     return points.filter((point, index, arr) => {
@@ -2053,8 +2271,8 @@ export default function AppShell() {
     let bottom = null;
     for (const point of points) {
       if (!point || point.length < 3) continue;
-      if (point[index] >= 0 && top === null) top = point;
-      if (point[index] < 0 && bottom === null) bottom = point;
+      if (isNonNegativeSide(point[index]) && top === null) top = point;
+      if (!isNonNegativeSide(point[index]) && bottom === null) bottom = point;
       if (top && bottom) break;
     }
     const output = [];
@@ -2088,7 +2306,7 @@ export default function AppShell() {
       planeX,
       planeY,
       height,
-      isAbove: height >= 0,
+      isAbove: isNonNegativeSide(height),
       phi,
       rPlane,
     };
@@ -2108,36 +2326,6 @@ export default function AppShell() {
     }
     return new THREE.Vector3(cylinderRadius * cosPhi, cylinderRadius * sinPhi, rimHeight);
   }
-
-  // Define SYMMETRY_OPERATIONS for use in handlers
-  const SYMMETRY_OPERATIONS = {
-    '1': { name: 'Identity (1)', order: 1, transform: (x,y,z) => [x,y,z] },
-    '2//Oz': { name: '2-fold rotation // Oz', order: 2, transform: (x,y,z) => [-x,-y,z] },
-    '2//Oy': { name: '2-fold rotation // Oy', order: 2, transform: (x,y,z) => [-x,y,-z] },
-    '3': { name: '3-fold rotation (C3)', order: 3, transform: (x,y,z) => {
-      const cos = Math.cos(2*Math.PI/3), sin = Math.sin(2*Math.PI/3);
-      return [x*cos - y*sin, x*sin + y*cos, z];
-    }},
-    '4': { name: '4-fold rotation (C4)', order: 4, transform: (x,y,z) => [-y,x,z] },
-    '6': { name: '6-fold rotation (C6)', order: 6, transform: (x,y,z) => {
-      const cos = Math.cos(Math.PI/3), sin = Math.sin(Math.PI/3);
-      return [x*cos - y*sin, x*sin + y*cos, z];
-    }},
-    '1̄': { name: 'Inversion (1̄)', order: 1, transform: (x,y,z) => [-x,-y,-z] },
-    '2̄//Oz': { name: 'Mirror ⊥ Oz (2̄ // Oz)', order: 2, transform: (x,y,z) => [x,y,-z] },
-    '2̄//Oy': { name: 'Mirror ⊥ Oy (2̄ // Oy)', order: 2, transform: (x,y,z) => [x,-y,z] },
-    '3̄': { name: '3-fold improper (3̄)', order: 6, transform: (x,y,z) => {
-      const cos = Math.cos(2*Math.PI/3), sin = Math.sin(2*Math.PI/3);
-      const rx = x*cos - y*sin, ry = x*sin + y*cos;
-      return [-rx, -ry, -z];
-    }, compound: true },
-    '4̄': { name: '4-fold improper (4̄)', order: 8, transform: (x,y,z) => [-y,x,-z], compound: true },
-    '6̄': { name: '6-fold improper (6̄)', order: 12, transform: (x,y,z) => {
-      const cos = Math.cos(Math.PI/3), sin = Math.sin(Math.PI/3);
-      const rx = x*cos - y*sin, ry = x*sin + y*cos;
-      return [-rx, -ry, -z];
-    }, compound: true }
-  };
 
   // ── Gallery ────────────────────────────────────────────────────────────────
   function disposeGallery() {
@@ -2177,13 +2365,14 @@ export default function AppShell() {
 
     keys.forEach((key, ki) => {
       const s = STRUCTS[key];
+      const displayName = t(STRUCT_NAME_KEY[key]) || s.name;
       const card = document.createElement('div');
       card.className = 'gallery-card';
       card.setAttribute('data-key', key);
       card.setAttribute('data-gallery-idx', ki);
       card.setAttribute('tabindex', '0');
       card.setAttribute('role', 'button');
-      card.setAttribute('aria-label', `View ${s.name} in detail`);
+      card.setAttribute('aria-label', t('ariaViewInDetail', { name: displayName }));
       card.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2201,7 +2390,7 @@ export default function AppShell() {
 
       const lbl = document.createElement('div');
       lbl.className = 'gallery-label';
-      lbl.innerHTML = `<div class="gname">${s.name}</div><div class="gmeta">Z=${s.z} · CN=${s.cn} · APF=${s.apf}</div>`;
+      lbl.innerHTML = `<div class="gname">${displayName}</div><div class="gmeta">Z=${s.z} · CN=${s.cn} · APF=${s.apf}</div>`;
       card.appendChild(wrap);
       card.appendChild(lbl);
       container.appendChild(card);
@@ -2246,7 +2435,7 @@ export default function AppShell() {
       disposeGallery();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTab, tabSwitchKey, galleryCellSize]);
+  }, [currentTab, tabSwitchKey, galleryCellSize, lang]);
 
   function buildStructureInScene(key, targetScene) {
     const s = STRUCTS[key];
@@ -2288,7 +2477,7 @@ export default function AppShell() {
         targetScene.add(mesh);
         return mesh;
       });
-      if (showBonds) drawBonds(s, meshes, s.atoms, targetScene);
+      if (showBonds && CUBIC_STRUCT_KEYS.includes(key)) drawBonds(s, meshes, s.atoms, targetScene);
     })));
   }
 
@@ -2332,9 +2521,6 @@ export default function AppShell() {
     applyOrbit();
   }
 
-  // ── isCubicMetal for CPK disable ──────────────────────────────────────────
-  const isCubicMetal = ['sc','bcc','fcc'].includes(structKey);
-
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <div style={{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden',background:'var(--bg)',color:'var(--text)',fontFamily:"'Exo 2', sans-serif"}}>
@@ -2344,13 +2530,9 @@ export default function AppShell() {
         lang={lang}
         autoRot={autoRot}
         theme={theme}
-        sidebarOpen={sidebarOpen}
-        isCompactMode={isCompactMode}
-        isSidebarPinned={isSidebarPinned}
         onToggleLang={() => setLang(l => l==='en'?'fr':'en')}
         onToggleAutoRot={() => setAutoRot(v => !v)}
         onToggleTheme={toggleTheme}
-        onToggleSidebarPin={() => setIsSidebarPinned(v => !v)}
         t={t}
       />
 
@@ -2375,7 +2557,7 @@ export default function AppShell() {
             transition:'left 0.25s ease', color:'var(--dim)', fontSize:'0.7rem',
           }}
           role="button"
-          aria-label="Toggle sidebar"
+          aria-label={t('ariaToggleSidebar')}
           aria-expanded={sidebarOpen}
         >
           <svg width="10" height="14" viewBox="0 0 10 14" fill="none"
@@ -2426,7 +2608,6 @@ export default function AppShell() {
               cellSize={cellSize}
               showBonds={showBonds}
               renderMode={renderMode}
-              isCubicMetal={isCubicMetal}
               structInfo={structInfo}
               onStructChange={setStructKey}
               onCellSize={setCellSizeState}
@@ -2470,13 +2651,17 @@ export default function AppShell() {
               onStartPoint={setSymmetryPoint}
               selectedOperation={selectedOperation}
               onOperationSelect={handleOperationSelect}
+              selectedAxis={selectedAxis}
+              onAxisSelect={handleAxisSelect}
+              axisAutoSynced={axisAutoSynced}
               onApplyOperation={applySymmetryOperation}
               onReset={handleSymmetryReset}
               onUndo={handleSymmetryUndo}
               onBack={handleSymmetryBack}
               operationsLog={operationsLog}
               stepMode={stepMode}
-              onStepMode={setStepMode}
+              onStepModeToggle={handleStepModeToggle}
+              stepFreshEntry={stepFreshEntry}
               currentStep={currentStep}
               onCurrentStep={setCurrentStep}
               currentBasePoint={currentBasePoint}
@@ -2515,7 +2700,7 @@ export default function AppShell() {
           ref={vpGalleryRef}
           className="viewport-gallery"
           role="main"
-          aria-label="Structure Gallery"
+          aria-label={t('ariaStructureGallery')}
           style={{
             display: currentTab==='gallery' ? 'grid' : 'none',
             flex:1, overflowY:'auto', padding:16,
@@ -2539,9 +2724,9 @@ export default function AppShell() {
             {/* 2D Stereographic Projection Panel */}
             {showSymmetryPanel ? (
               <div style={{
-                flex: isCompactMode ? '0 0 50%' : 2,
+                flex: isCompactMode ? 1 : 2,
                 minWidth:0,
-                minHeight: isCompactMode ? '45%' : 'auto',
+                minHeight:0,
                 position:'relative',
                 border:'1px solid var(--border)',
                 borderRadius:8,
@@ -2560,7 +2745,7 @@ export default function AppShell() {
                     cursor:'pointer', zIndex:90
                   }}
                   role="button"
-                  aria-label={showSymmetryPanel ? 'Hide symmetry side panel' : 'Show symmetry side panel'}
+                  aria-label={showSymmetryPanel ? t('ariaHideSymmetryPanel') : t('ariaShowSymmetryPanel')}
                   onClick={() => setShowSymmetryPanel(v => !v)}
                 >
                   <svg width="10" height="14" viewBox="0 0 10 14" fill="none"
@@ -2570,15 +2755,17 @@ export default function AppShell() {
                 </div>
                 <div style={{height:'100%', width:'100%', display:'flex', flexDirection:'column'}}>
                   <div style={{padding:12, background:'var(--panel)', borderBottom:'1px solid var(--border)'}}>
-                    <h3 style={{margin:0, fontSize:'14px', color:'var(--text)'}}>Stereographic Projection</h3>
+                    <h3 style={{margin:0, fontSize:'14px', color:'var(--text)'}}>{t('labelStereographicProjection')}</h3>
                   </div>
                   <StereographicProjection
+                    t={t}
                     selectedOperation={selectedOperation}
                     operationsLog={operationsLog}
                     startPoint={symmetryPoint}
                     savedAtoms={savedAtoms}
                     previewAtom={previewAtom}
                     currentBasePoint={currentBasePoint}
+                    stepMode={stepMode}
                     projectionZoom={projectionZoom}
                     onProjectionZoomChange={setProjectionZoom}
                   />
@@ -2590,17 +2777,16 @@ export default function AppShell() {
                   className="ov-btn"
                   style={{fontSize:'0.9rem', padding:'6px 8px', height:32, whiteSpace:'nowrap'}}
                   onClick={() => setShowSymmetryPanel(true)}
-                  aria-label="Show symmetry side panel"
+                  aria-label={t('ariaShowSymmetryPanel')}
                 >
-                  ◀ Show
+                  {t('btnShowPanel')}
                 </button>
               </div>
             )}
 
             {/* 3D Cylinder View Panel */}
             <div style={{
-              flex: showSymmetryPanel ? (isCompactMode ? '0 0 50%' : 3) : 1,
-              minHeight: isCompactMode ? '45%' : 'auto',
+              flex: showSymmetryPanel ? (isCompactMode ? 1 : 3) : 1,
               position:'relative',
               border:'1px solid var(--border)',
               borderRadius:8,
@@ -2611,7 +2797,7 @@ export default function AppShell() {
               minHeight:0,
             }}>
               <div style={{padding:12, background:'var(--panel)', borderBottom:'1px solid var(--border)'}}>
-                <h3 style={{margin:0, fontSize:'14px', color:'var(--text)'}}>3D Cylinder View</h3>
+                <h3 style={{margin:0, fontSize:'14px', color:'var(--text)'}}>{t('label3DCylinderView')}</h3>
               </div>
               <div
                 ref={vpRef}
@@ -2628,15 +2814,15 @@ export default function AppShell() {
               >
                 {/* Overlay buttons */}
                 <div style={{position:'absolute',top:10,right:10,zIndex:5,display:'flex',flexDirection:'column',gap:5}}>
-                  <button className="ov-btn" onClick={resetCam} aria-label="Reset camera">
+                  <button className="ov-btn" onClick={resetCam} aria-label={t('ariaResetCamera')}>
                     ↺ {t('btnResetCam')}
                   </button>
                 </div>
 
-                {/* Axis labels */}
-                <div ref={axLblXRef} className="axis-label" id="ax-lbl-x" style={{color:'#ff4444',display:'none'}}>a</div>
-                <div ref={axLblYRef} className="axis-label" id="ax-lbl-y" style={{color:'#33dd33',display:'none'}}>b</div>
-                <div ref={axLblZRef} className="axis-label" id="ax-lbl-z" style={{color:'#3399ff',display:'none'}}>c</div>
+                {/* Axis labels — Symmetry section uses x/y/z instead of a/b/c */}
+                <div ref={axLblXRef} className="axis-label" id="ax-lbl-x" style={{color:'#ff4444',display:'none'}}>x</div>
+                <div ref={axLblYRef} className="axis-label" id="ax-lbl-y" style={{color:'#33dd33',display:'none'}}>y</div>
+                <div ref={axLblZRef} className="axis-label" id="ax-lbl-z" style={{color:'#3399ff',display:'none'}}>z</div>
               </div>
             </div>
           </main>
@@ -2647,7 +2833,7 @@ export default function AppShell() {
           <main
             ref={vpRef}
             role="main"
-            aria-label="3D Crystal Viewer"
+            aria-label={t('ariaCrystalViewer')}
             style={{
                 flex:1, position:'relative', overflow:'hidden', minHeight:'0',
                 display: currentTab==='gallery' ? 'none' : 'flex',
@@ -2656,16 +2842,16 @@ export default function AppShell() {
           >
             {/* Overlay buttons */}
             <div style={{position:'absolute',top:10,right:10,zIndex:5,display:'flex',flexDirection:'column',gap:5}}>
-              <button className="ov-btn" onClick={resetCam} aria-label="Reset camera">
+              <button className="ov-btn" onClick={resetCam} aria-label={t('ariaResetCamera')}>
                 ↺ {t('btnResetCam')}
               </button>
               {isCompactMode && !sidebarOpen && (
                 <button
                   className="ov-btn"
                   onClick={() => { setSidebarOpen(true); setIsSidebarPinned(true); }}
-                  aria-label="Show controls"
+                  aria-label={t('btnShowControls')}
                 >
-                  ☰ Show controls
+                  {t('btnShowControls')}
                 </button>
               )}
             </div>
@@ -2675,11 +2861,14 @@ export default function AppShell() {
             <div ref={axLblYRef} className="axis-label" id="ax-lbl-y" style={{color:'#33dd33',display:'none'}}>b</div>
             <div ref={axLblZRef} className="axis-label" id="ax-lbl-z" style={{color:'#3399ff',display:'none'}}>c</div>
 
-            {/* Hints */}
-            <div id="hint" style={{position:'absolute',bottom:10,left:'50%',transform:'translateX(-50%)',fontSize:'0.65rem',color:'var(--dim)',opacity:0.6,fontFamily:"'Share Tech Mono',monospace",pointerEvents:'none'}}>
+            {/* Hints — styled via the .hint / .keyboard-hint classes in
+                globals.css (which also handle wrapping/shrinking on small
+                screens), not inline styles, so those responsive rules
+                actually apply. */}
+            <div className="hint">
               {t('hint')}
             </div>
-            <div style={{position:'absolute',bottom:28,left:'50%',transform:'translateX(-50%)',fontSize:'0.6rem',color:'var(--dim)',opacity:0.45,fontFamily:"'Share Tech Mono',monospace",pointerEvents:'none',whiteSpace:'nowrap'}}>
+            <div className="keyboard-hint">
               {t('keyboardHint')}
             </div>
           </main>
@@ -2702,12 +2891,13 @@ export default function AppShell() {
         open={mobileDrawerOpen}
         onClose={() => setMobileDrawerOpen(false)}
         currentTab={currentTab}
+        t={t}
       >
         {currentTab === 'struct' && (
           <StructControls
             t={t} structKey={structKey} cellSize={cellSize}
             showBonds={showBonds} renderMode={renderMode}
-            isCubicMetal={isCubicMetal} structInfo={structInfo}
+            structInfo={structInfo}
             onStructChange={setStructKey} onCellSize={setCellSizeState}
             onBonds={setShowBonds} onRenderMode={setRenderMode}
           />
@@ -2746,13 +2936,17 @@ export default function AppShell() {
             onStartPoint={setSymmetryPoint}
             selectedOperation={selectedOperation}
             onOperationSelect={handleOperationSelect}
+            selectedAxis={selectedAxis}
+            onAxisSelect={handleAxisSelect}
+            axisAutoSynced={axisAutoSynced}
             onApplyOperation={applySymmetryOperation}
             onReset={handleSymmetryReset}
             onUndo={handleSymmetryUndo}
             onBack={handleSymmetryBack}
             operationsLog={operationsLog}
             stepMode={stepMode}
-            onStepMode={setStepMode}
+            onStepModeToggle={handleStepModeToggle}
+            stepFreshEntry={stepFreshEntry}
             currentStep={currentStep}
             onCurrentStep={setCurrentStep}
             currentBasePoint={currentBasePoint}

@@ -2,10 +2,11 @@
 
 export default function MobileNav({ activeTab, onTab, t, onOpenDrawer }) {
   const tabs = [
-    { id: 'struct',  icon: '⬡', label: t('tabStruct').split(' ')[0] },
-    { id: 'miller',  icon: '⊞', label: 'Miller' },
-    { id: 'gallery', icon: '⊟', label: 'Gallery' },
-    { id: 'controls',icon: '☰', label: 'Controls' },
+    { id: 'struct',   icon: '⬡', label: t('tabStruct').split(' ')[0] },
+    { id: 'miller',   icon: '⊞', label: t('tabMillerShort') },
+    { id: 'symmetry', icon: '⚛', label: t('tabSymmetry') },
+    { id: 'gallery',  icon: '⊟', label: t('tabGalleryShort') },
+    { id: 'controls', icon: '☰', label: t('labelControls') },
   ]
 
   return (

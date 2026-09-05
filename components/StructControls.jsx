@@ -1,5 +1,6 @@
 'use client'
-import { STRUCTS } from '@/lib/structs';
+import { STRUCTS, CUBIC_STRUCT_KEYS } from '@/lib/structs';
+import { STRUCT_NAME_KEY } from '@/lib/translations';
 
 export default function StructControls({
   t, structKey, cellSize, showBonds, renderMode,
@@ -20,11 +21,11 @@ export default function StructControls({
     groupCubic: ['sc', 'bcc', 'fcc'],
     groupTetra: ['tet_p', 'tet_i'],
     groupOrtho: ['ort_p', 'ort_i', 'ort_f', 'ort_c'],
-    groupHexa: ['hex_p'],
+    groupHexa: ['hex_p', 'hcp'],
     groupTrig: ['rho_r'],
     groupMono: ['mon_p', 'mon_c'],
     groupTricl: ['tri_p'],
-    groupIonic: ['hcp', 'cscl', 'nacl', 'zns', 'caf2', 'diamond'],
+    groupIonic: ['cscl', 'nacl', 'zns', 'caf2', 'diamond'],
   };
 
   const remainingKeys = Object.keys(STRUCTS).filter(key => !Object.values(groups).flat().includes(key));
@@ -35,14 +36,14 @@ export default function StructControls({
         {Object.entries(groups).map(([groupKey, keys]) => (
           <optgroup key={groupKey} label={t(groupKey)}>
             {keys.map(key => (
-              <option key={key} value={key}>{STRUCTS[key]?.name || key}</option>
+              <option key={key} value={key}>{t(STRUCT_NAME_KEY[key]) || STRUCTS[key]?.name || key}</option>
             ))}
           </optgroup>
         ))}
         {remainingKeys.length > 0 && (
           <optgroup label={t('groupOther') || 'Other'}>
             {remainingKeys.map(key => (
-              <option key={key} value={key}>{STRUCTS[key]?.name || key}</option>
+              <option key={key} value={key}>{t(STRUCT_NAME_KEY[key]) || STRUCTS[key]?.name || key}</option>
             ))}
           </optgroup>
         )}
@@ -55,11 +56,15 @@ export default function StructControls({
         ))}
       </div>
 
-      <span className="ctrl-label">{t('labelBonds')}</span>
-      <div className="mode-toggle">
-        <button className={`mode-btn${showBonds?' active':''}`} onClick={() => onBonds(true)}>{t('bondsOn')}</button>
-        <button className={`mode-btn${!showBonds?' active':''}`} onClick={() => onBonds(false)}>{t('bondsOff')}</button>
-      </div>
+      {CUBIC_STRUCT_KEYS.includes(structKey) && (
+        <>
+          <span className="ctrl-label">{t('labelBonds')}</span>
+          <div className="mode-toggle">
+            <button className={`mode-btn${showBonds?' active':''}`} onClick={() => onBonds(true)}>{t('bondsOn')}</button>
+            <button className={`mode-btn${!showBonds?' active':''}`} onClick={() => onBonds(false)}>{t('bondsOff')}</button>
+          </div>
+        </>
+      )}
 
       <span className="ctrl-label">{t('labelRenderMode')}</span>
       <div className="mode-toggle">
